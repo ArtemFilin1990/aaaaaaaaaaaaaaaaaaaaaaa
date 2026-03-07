@@ -1,5 +1,5 @@
 """
-Tests for synchronous Dadata API client.
+Tests for asynchronous Dadata API client.
 """
 
 import datetime as dt
