@@ -6,7 +6,7 @@ import pathlib
 import re
 import shutil
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"}
 TEXT_EXTENSIONS = {
@@ -111,7 +111,7 @@ def main() -> None:
     report: list[str] = [
         "# ARCHIVE CONTENT INDEX",
         "",
-        f"Generated: {datetime.now(UTC).isoformat()}",
+        f"Generated: {datetime.now(timezone.utc).isoformat()}",
         f"Total extracted files: {len(files)}",
         f"Archive containers processed (including nested): {len(processed)}",
         "",
