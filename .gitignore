@@ -130,3 +130,5 @@ dmypy.json
 .pyre/
 
 .vscode/
+# Archive processing artifacts
+unpacked_archives/
