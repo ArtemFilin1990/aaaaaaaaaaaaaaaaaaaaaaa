@@ -64,6 +64,20 @@ npm run dev
 - Dadata secret key — опционально
 - Checko API key — для расширенных разделов
 
+## Сборка рабочего бота из архива
+
+В репозитории хранится архив `Dadata-Bot-working.zip` с готовым проектом бота.
+Собрать рабочую директорию можно так:
+
+```bash
+python scripts/assemble_working_bot.py --force
+cd working-bot
+npm install
+npm run dev
+```
+
+Скрипт валидирует, что в распакованном проекте есть ключевые файлы бота (`package.json`, `server/index.ts`, `server/routes.ts`, `client/src/main.tsx`).
+
 ## Что просмотрено из архивов
 - `Dadata-Bot.zip` — исходная база Replit-проекта
 - `Dadata-Bot-checko-patch.zip` — промежуточный патч
