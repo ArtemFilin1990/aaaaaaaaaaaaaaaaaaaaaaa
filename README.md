@@ -15,6 +15,16 @@ Requirements:
 -   Python 3.9+
 -   [httpx](https://pypi.org/project/httpx/)
 
+## Development checks
+
+Run checks through `uv` so test dependencies from the `dev` group are installed automatically:
+
+```sh
+uv run ruff check
+uv run ruff format --check
+uv run pytest -q
+```
+
 ## Usage
 
 Import Dadata client and set API keys:
