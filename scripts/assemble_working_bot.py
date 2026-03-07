@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
@@ -33,6 +34,79 @@ def _safe_relative_path(member_name: str, prefix: str) -> Path | None:
         raise ValueError(f"Unsafe archive member path: {member_name}")
 
     return Path(*member.parts)
+
+
+def enrich_company_extra_formatter(routes_source: str) -> str:
+    pattern = r"function formatCompanyExtra\(mainData: any\): string \{.*?\n\}\n\nfunction formatEntrepreneurExtra"
+    replacement = """function formatCompanyExtra(mainData: any): string {
+  const support = Array.isArray(mainData?.ПоддержМСП) ? mainData.ПоддержМСП : [];
+  const sanctionsCountries = Array.isArray(mainData?.СанкцииСтраны) ? mainData.СанкцииСтраны : [];
+  const badSupplierRecords = Array.isArray(mainData?.НедобПостЗап) ? mainData.НедобПостЗап : [];
+  const efrsbRecords = Array.isArray(mainData?.ЕФРСБ) ? mainData.ЕФРСБ : [];
+
+  const supportWithIssues = support.filter((item: any) => Boolean(item?.Наруш)).length;
+  const supportTotal = support.reduce((sum: number, item: any) => sum + Number(item?.Размер || 0), 0);
+
+  const lines = ["➕ Дополнительно", ""];
+  lines.push(`Наименование на английском: ${trimText(mainData?.НаимАнгл) || "не найдено"}`);
+  lines.push(`Товарные знаки: ${Array.isArray(mainData?.ТоварЗнак) ? mainData.ТоварЗнак.length : 0}`);
+  lines.push(`Среднесписочная численность (СЧР, 2024): ${firstDefined(mainData?.СЧР, mainData?.СрЧисл) ?? "данные не найдены"}`);
+  lines.push(`МСП с господдержкой: ${support.length ? `да (${support.length})` : "нет"}`);
+
+  if (support.length) {
+    lines.push(`Поддержка с нарушениями: ${supportWithIssues}`);
+    lines.push(`Суммарный размер поддержки: ${supportTotal > 0 ? formatMoney(supportTotal) : "данные не найдены"}`);
+    const firstSupport = support[0];
+    const org = trimText(firstSupport?.НаимОрг) || trimText(firstSupport?.Наименование);
+    const inn = trimText(firstSupport?.ИНН);
+    if (org || inn) {
+      lines.push(`Первая запись поддержки: ${[org, inn ? `ИНН ${inn}` : ""].filter(Boolean).join(" · ")}`);
+    }
+  }
+
+  lines.push(`Недобросовестный поставщик: ${mainData?.НедобПост ? "да" : "нет"}`);
+  if (badSupplierRecords.length) {
+    lines.push(`Записей в РНП: ${badSupplierRecords.length}`);
+    const firstBadSupplier = badSupplierRecords[0];
+    const contractNo = trimText(firstBadSupplier?.ЗакупНомер);
+    const registryNo = trimText(firstBadSupplier?.РеестрНомер);
+    if (registryNo || contractNo) {
+      lines.push(`Первая запись РНП: ${[registryNo ? `реестр ${registryNo}` : "", contractNo ? `закупка ${contractNo}` : ""].filter(Boolean).join(" · ")}`);
+    }
+  }
+
+  lines.push(`Дисквалифицированные лица: ${mainData?.ДисквЛица ? "да" : "нет"}`);
+  lines.push(`Массовый руководитель: ${mainData?.МассРуковод ? "да" : "нет"}`);
+  lines.push(`Массовый учредитель: ${mainData?.МассУчред ? "да" : "нет"}`);
+  lines.push(`Нелегальная деятельность на финрынке: ${mainData?.НелегалФин ? "выявлено" : "не выявлено"}`);
+  if (trimText(mainData?.НелегалФинСтатус)) {
+    lines.push(`Статус нелегальной деятельности: ${trimText(mainData?.НелегалФинСтатус)}`);
+  }
+
+  lines.push(`Санкции: ${mainData?.Санкции ? "да" : "нет"}`);
+  if (sanctionsCountries.length) lines.push(`Страны санкций: ${sanctionsCountries.join(", ")}`);
+  lines.push(`Санкции по правилу 50%: ${mainData?.СанкцУчр ? "да" : "нет"}`);
+
+  if (mainData?.ТекФНС) {
+    lines.push(`Текущая ФНС: ${trimText(mainData.ТекФНС.НаимОрг) || trimText(mainData.ТекФНС.КодОрг) || "—"}`);
+  }
+
+  lines.push(`ЕФРСБ: ${efrsbRecords.length}`);
+  if (efrsbRecords.length) {
+    const firstEfrsb = efrsbRecords[0];
+    const type = trimText(firstEfrsb?.Тип);
+    const date = formatDate(firstEfrsb?.Дата);
+    const caseNo = trimText(firstEfrsb?.Дело);
+    if (type || date !== "дата не указана" || caseNo) {
+      lines.push(`Первая запись ЕФРСБ: ${[type, date !== "дата не указана" ? date : "", caseNo ? `дело ${caseNo}` : ""].filter(Boolean).join(" · ")}`);
+    }
+  }
+
+  return lines.join("\\n");
+}
+
+function formatEntrepreneurExtra"""
+    return re.sub(pattern, lambda _: replacement, routes_source, flags=re.S)
 
 
 def extract_bot_archive(archive: Path, output_dir: Path, prefix: str, force: bool = False) -> None:
@@ -93,6 +167,7 @@ def apply_compatibility_fixes(output_dir: Path) -> None:
     if routes_path.exists():
         routes = routes_path.read_text()
         patched = routes.replace("actual: true", "actual: 1")
+        patched = enrich_company_extra_formatter(patched)
         if patched != routes:
             routes_path.write_text(patched)
 

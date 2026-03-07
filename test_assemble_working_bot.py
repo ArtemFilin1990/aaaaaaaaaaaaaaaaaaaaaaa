@@ -6,7 +6,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from scripts.assemble_working_bot import extract_bot_archive
+from scripts.assemble_working_bot import enrich_company_extra_formatter, extract_bot_archive
 
 
 @pytest.fixture
@@ -15,7 +15,22 @@ def bot_archive(tmp_path: Path) -> Path:
     with ZipFile(archive, "w") as zip_file:
         zip_file.writestr("final_bot/package.json", "{}")
         zip_file.writestr("final_bot/server/index.ts", "console.log('ok')")
-        zip_file.writestr("final_bot/server/routes.ts", "const q = { actual: true };\n")
+        zip_file.writestr(
+            "final_bot/server/routes.ts",
+            """
+function formatCompanyExtra(mainData: any): string {
+  const lines = ["➕ Дополнительно", ""];
+  return lines.join("\\n");
+}
+
+function formatEntrepreneurExtra(mainData: any): string {
+  const lines = ["ok"];
+  return lines.join("\\n");
+}
+
+const queryA = { actual: true };
+""",
+        )
         zip_file.writestr("final_bot/client/src/main.tsx", "export {}")
         zip_file.writestr("final_bot/tsconfig.json", '{"compilerOptions": {}}')
     return archive
@@ -37,7 +52,19 @@ def test_extract_bot_archive_applies_compatibility_fixes(bot_archive: Path, tmp_
 
     tsconfig = json.loads((output / "tsconfig.json").read_text())
     assert tsconfig["compilerOptions"]["target"] == "ES2020"
-    assert "actual: true" not in (output / "server" / "routes.ts").read_text()
+
+    routes_text = (output / "server" / "routes.ts").read_text()
+    assert "actual: true" not in routes_text
+    assert "actual: 1" in routes_text
+    assert "Среднесписочная численность (СЧР, 2024)" in routes_text
+    assert "Поддержка с нарушениями" in routes_text
+    assert "Записей в РНП" in routes_text
+    assert "Санкции по правилу 50%" in routes_text
+
+
+def test_enrich_company_extra_formatter_no_op_when_function_is_missing() -> None:
+    source = "function foo() { return 'bar'; }"
+    assert enrich_company_extra_formatter(source) == source
 
 
 def test_extract_bot_archive_requires_core_files(tmp_path: Path) -> None:
