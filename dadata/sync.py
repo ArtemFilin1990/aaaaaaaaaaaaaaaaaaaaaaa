@@ -200,7 +200,7 @@ class DadataClient:
         """Cleanse `source` as `name` data type."""
         return self._cleaner.clean(name=name, source=source)
 
-    def clean_record(self, structure: List[str], record: List[str]) -> List[Dict]:
+    def clean_record(self, structure: List[str], record: List[str]) -> Optional[List[Dict]]:
         """Cleanse `record` of specified `structure`."""
         return self._cleaner.clean_record(structure=structure, record=record)
 
