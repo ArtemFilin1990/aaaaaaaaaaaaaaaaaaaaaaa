@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    /* iOS 17+ System Colors */
+    --background: 0 0% 95%;          /* System Background */
+    --foreground: 0 0% 0%;           /* Label */
+    
+    --card: 0 0% 100%;               /* Secondary System Background */
+    --card-foreground: 0 0% 0%;
+    --card-border: 0 0% 90%;
+    
+    --primary: 210 100% 50%;         /* System Blue */
+    --primary-foreground: 0 0% 100%;
+    
+    --muted: 0 0% 90%;               /* System Gray 6 */
+    --muted-foreground: 0 0% 60%;    /* Secondary Label */
+    
+    --accent: 210 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    
+    --success: 120 100% 40%;         /* System Green */
+    --success-foreground: 0 0% 100%;
+    
+    --destructive: 0 100% 50%;       /* System Red */
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 0 0% 88%;
+    --input: 0 0% 93%;               /* System Gray 5 */
+    --ring: 210 100% 50%;
+    
+    --radius: 0.75rem;               /* iOS Corner Radius approx */
+  }
+
+  * {
+    @apply border-border;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/20;
+    font-family: var(--font-sans);
+    letter-spacing: -0.015em;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+  }
+}
+
+@layer utilities {
+  .ios-card {
+    @apply bg-card border-none shadow-none rounded-[12px];
+  }
+  
+  .ios-inset-group {
+    @apply bg-card rounded-[12px] overflow-hidden;
+  }
+
+  .ios-row {
+    @apply flex items-center px-4 py-3 bg-card active:bg-zinc-100 transition-colors border-b border-zinc-100 last:border-none;
+  }
+  
+  .ios-input {
+    @apply bg-transparent border-none focus:ring-0 p-0 text-[17px] w-full placeholder:text-zinc-400;
+  }
+
+  .ios-button-primary {
+    @apply bg-primary text-white font-semibold py-3 px-4 rounded-[12px] active:opacity-70 transition-opacity text-[17px] text-center w-full;
+  }
+
+  .ios-button-secondary {
+    @apply bg-zinc-100 text-primary font-medium py-3 px-4 rounded-[12px] active:bg-zinc-200 transition-colors text-[17px] text-center w-full;
+  }
+}
+
+/* Custom styles for minimalist look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-200 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-zinc-300;
+}
