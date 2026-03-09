@@ -1,76 +1,140 @@
+"""
+Клиент Checko.ru API v2.4
+Документация: https://checko.ru/integration/api
+
+Эндпоинты:
+  /v2/company      — ЕГРЮЛ (организации)
+  /v2/finances     — Финансовая отчётность
+  /v2/legal-cases  — Арбитражные дела
+  /v2/contracts    — Контракты по госзакупкам
+"""
+
 import os
 import requests
 from typing import Optional
 
-CHECKO_BASE_URL = "https://api.checko.ru/v2"
+BASE_URL = "https://api.checko.ru/v2"
+
+# Коды строк бухгалтерской отчётности (БФО ФНС)
+_FINANCE_ROWS = {
+    "2110": "Выручка",
+    "2120": "Себестоимость",
+    "2200": "Прибыль от продаж",
+    "2300": "Прибыль до налогообложения",
+    "2400": "Чистая прибыль",
+}
 
 
-def get_company_by_inn(inn: str) -> Optional[dict]:
-    """
-    Запрашивает данные компании по ИНН через API Checko.ru.
-    Возвращает словарь с данными или None при ошибке.
-    """
+def _request(endpoint: str, params: dict) -> Optional[dict]:
+    """Базовый GET-запрос к API. Возвращает dict или None при ошибке."""
     api_key = os.getenv("CHECKO_API_KEY")
     if not api_key:
         raise ValueError("CHECKO_API_KEY не задан в переменных окружения")
 
+    params = {**params, "key": api_key}
     try:
-        response = requests.get(
-            f"{CHECKO_BASE_URL}/company",
-            params={"key": api_key, "inn": inn},
+        resp = requests.get(
+            f"{BASE_URL}/{endpoint}",
+            params=params,
             timeout=10,
         )
-        response.raise_for_status()
-        data = response.json()
+        resp.raise_for_status()
+        data = resp.json()
     except requests.RequestException:
         return None
 
-    # API возвращает {"data": {...}} или {"error": "..."}
-    if "data" not in data or not data["data"]:
+    meta = data.get("meta") or {}
+    if meta.get("status") != "ok":
         return None
 
-    return data["data"]
+    return data
 
+
+# ── Запросы к API ──────────────────────────────────────────────────────────────
+
+def get_company(inn: str) -> Optional[dict]:
+    """
+    GET /v2/company — данные ЕГРЮЛ.
+
+    Ответ API: {"data": {ОГРН, ИНН, КПП, НаимСокр, НаимПолн, ДатаРег,
+                          Статус, ДатаЛикв, РегионКод, ЮрАдрес, ОКВЭД,
+                          Руководители: [...], Учредители: [...]},
+                "meta": {...}}
+
+    Возвращает объект data или None.
+    """
+    resp = _request("company", {"inn": inn})
+    if resp is None:
+        return None
+    return resp.get("data") or None
+
+
+def get_finances(inn: str) -> Optional[dict]:
+    """
+    GET /v2/finances — финансовая отчётность.
+
+    Ответ API: {"company": {...},
+                "data": {"2023": {"2110": int, "2400": int, ...}, ...},
+                "meta": {...}}
+
+    Возвращает полный ответ (нужен data + company).
+    """
+    return _request("finances", {"inn": inn})
+
+
+def get_legal_cases(inn: str) -> Optional[dict]:
+    """
+    GET /v2/legal-cases — арбитражные дела.
+
+    Ответ API: {"company": {...},
+                "data": {"ЗапВсего": int, "ОбщСуммИск": float,
+                         "Записи": [{Номер, UUID, СтрКАД, Дата, Суд,
+                                     Ист: [...], Ответ: [...], СуммИск}]},
+                "meta": {...}}
+    """
+    return _request("legal-cases", {"inn": inn, "sort": "-date"})
+
+
+def get_contracts(inn: str) -> Optional[dict]:
+    """
+    GET /v2/contracts — контракты по 44-ФЗ.
+
+    Ответ API: {"company": {...},
+                "data": {"ЗапВсего": int, "СтрВсего": int,
+                         "Записи": [{РегНомер, СтрЕИС, РегионКод, Дата,
+                                     ДатаИсп, Цена, Заказ: {...},
+                                     Постав: [...], Объекты: [...]}]},
+                "meta": {...}}
+
+    Параметры law=44, role=supplier, sort=-date.
+    """
+    return _request("contracts", {"inn": inn, "law": "44", "sort": "-date"})
+
+
+# ── Форматирование ─────────────────────────────────────────────────────────────
 
 def extract_company_card(raw: dict) -> dict:
     """
-    Извлекает поля для карточки из сырого ответа API.
-    """
-    # Название
-    name = raw.get("НазваниеПолное") or raw.get("НазваниеКраткое") or "—"
+    Извлекает поля карточки из объекта data /v2/company.
 
-    # ИНН / ОГРН
+    Поля ответа: НаимПолн / НаимСокр, ИНН, ОГРН, Статус,
+                 ДатаРег, РегионКод, ЮрАдрес,
+                 Руководители[0].ФИО + .Должн
+    """
+    name = raw.get("НаимПолн") or raw.get("НаимСокр") or "—"
     inn = raw.get("ИНН") or "—"
     ogrn = raw.get("ОГРН") or "—"
+    status = raw.get("Статус") or "—"
+    reg_date = raw.get("ДатаРег") or "—"
+    region = raw.get("РегионКод") or "—"
 
-    # Статус
-    status_raw = raw.get("Статус") or {}
-    if isinstance(status_raw, dict):
-        status = status_raw.get("Название") or "—"
-    else:
-        status = str(status_raw) or "—"
-
-    # Дата регистрации
-    reg_date = raw.get("ДатаРегистрации") or "—"
-
-    # Директор
     director = "—"
-    руководитель = raw.get("Руководитель")
-    if isinstance(руководитель, dict):
-        fio = руководитель.get("ФИО") or руководитель.get("Имя") or ""
-        post = руководитель.get("Должность") or ""
+    руководители = raw.get("Руководители")
+    if isinstance(руководители, list) and руководители:
+        first = руководители[0]
+        fio = first.get("ФИО") or ""
+        post = first.get("Должн") or first.get("Должность") or ""
         director = f"{fio} ({post})" if post else fio or "—"
-    elif isinstance(руководитель, list) and руководитель:
-        first = руководитель[0]
-        fio = first.get("ФИО") or first.get("Имя") or ""
-        post = first.get("Должность") or ""
-        director = f"{fio} ({post})" if post else fio or "—"
-
-    # Регион
-    region = "—"
-    адрес = raw.get("Адрес") or {}
-    if isinstance(адрес, dict):
-        region = адрес.get("Регион") or адрес.get("НазваниеРегиона") or "—"
 
     return {
         "name": name,
@@ -83,112 +147,155 @@ def extract_company_card(raw: dict) -> dict:
     }
 
 
-def extract_finances(raw: dict) -> str:
-    """Извлекает финансовые данные из ответа API."""
-    финансы = raw.get("Финансы") or raw.get("БухОтчетность") or {}
+def format_finances(resp: dict) -> str:
+    """
+    Форматирует ответ /v2/finances.
 
-    if not финансы:
-        return "Финансовые данные недоступны."
+    data: {"год": {"2110": int, "2400": int, ...}}
+    Строки: 2110=Выручка, 2200=Прибыль от продаж, 2400=Чистая прибыль.
+    Суммы указаны в тысячах рублей.
+    """
+    data = resp.get("data") or {}
+    years = sorted([y for y in data if y.isdigit()], reverse=True)
 
-    lines = ["📊 <b>Финансы</b>\n"]
+    if not years:
+        return "📊 Финансовые данные недоступны."
 
-    # Поддержка как словаря, так и списка отчётных периодов
-    if isinstance(финансы, list):
-        финансы = финансы[0] if финансы else {}
+    lines = ["📊 <b>Финансовая отчётность</b> (тыс. руб.)"]
 
-    выручка = финансы.get("Выручка") or финансы.get("Revenue")
-    прибыль = финансы.get("ЧистаяПрибыль") or финансы.get("NetProfit")
-    налоги = финансы.get("НалогиСборы") or финансы.get("Taxes")
-    год = финансы.get("Год") or финансы.get("Year") or ""
-
-    if год:
-        lines.append(f"Период: {год}\n")
-    if выручка is not None:
-        lines.append(f"Выручка: {выручка:,} руб.")
-    if прибыль is not None:
-        lines.append(f"Чистая прибыль: {прибыль:,} руб.")
-    if налоги is not None:
-        lines.append(f"Налоги и сборы: {налоги:,} руб.")
-
-    if len(lines) == 1:
-        return "Финансовые данные недоступны."
+    for year in years[:3]:
+        year_data = data[year]
+        if not isinstance(year_data, dict):
+            continue
+        lines.append(f"\n<b>{year} год:</b>")
+        found = False
+        for code, label in _FINANCE_ROWS.items():
+            val = year_data.get(code)
+            if val is not None:
+                lines.append(f"  {label} (стр.{code}): {val:,}")
+                found = True
+        if not found:
+            lines.append("  Нет данных")
 
     return "\n".join(lines)
 
 
-def extract_courts(raw: dict) -> str:
-    """Извлекает арбитражные дела."""
-    суды = raw.get("Суды") or raw.get("Арбитраж") or []
+def format_legal_cases(resp: dict) -> str:
+    """
+    Форматирует ответ /v2/legal-cases.
 
-    if not суды:
+    data.Записи: [{Номер, Дата, Суд, Ист: [...], Ответ: [...],
+                   СуммИск, СтрКАД}]
+    """
+    data = resp.get("data") or {}
+    records = data.get("Записи") or []
+    total = data.get("ЗапВсего") or 0
+    total_sum = data.get("ОбщСуммИск")
+
+    if not records:
         return "⚖️ Арбитражных дел не найдено."
 
-    lines = [f"⚖️ <b>Арбитражные дела</b> (всего: {len(суды)})\n"]
-    for дело in суды[:5]:  # показываем первые 5
-        номер = дело.get("НомерДела") or дело.get("Номер") or "—"
-        статус = дело.get("Статус") or "—"
-        сумма = дело.get("СуммаИска") or ""
-        строка = f"• Дело {номер} — {статус}"
-        if сумма:
-            строка += f" ({сумма:,} руб.)"
-        lines.append(строка)
+    lines = [f"⚖️ <b>Арбитражные дела</b> (всего: {total})"]
+    if total_sum:
+        lines.append(f"Общая сумма исков: {total_sum:,.0f} руб.\n")
 
-    if len(суды) > 5:
-        lines.append(f"\n...и ещё {len(суды) - 5} дел(а)")
+    for case in records[:5]:
+        number = case.get("Номер") or "—"
+        date = case.get("Дата") or "—"
+        court = case.get("Суд") or "—"
+        sum_isk = case.get("СуммИск")
+        url = case.get("СтрКАД") or ""
 
-    return "\n".join(lines)
+        line = f"• <b>{number}</b> от {date}\n  {court}"
+        if sum_isk:
+            line += f"\n  Сумма иска: {sum_isk:,.0f} руб."
+        if url:
+            line += f'\n  <a href="{url}">Картотека арбитражных дел</a>'
+        lines.append(line)
 
-
-def extract_purchases(raw: dict) -> str:
-    """Извлекает госзакупки."""
-    закупки = raw.get("Госзакупки") or raw.get("Контракты") or []
-
-    if not закупки:
-        return "💰 Госконтрактов не найдено."
-
-    lines = [f"💰 <b>Госзакупки</b> (всего: {len(закупки)})\n"]
-    for контракт in закупки[:5]:
-        номер = контракт.get("НомерКонтракта") or контракт.get("Номер") or "—"
-        предмет = контракт.get("Предмет") or "—"
-        сумма = контракт.get("Сумма") or ""
-        строка = f"• {номер}: {предмет[:60]}..."
-        if сумма:
-            строка += f" — {сумма:,} руб."
-        lines.append(строка)
-
-    if len(закупки) > 5:
-        lines.append(f"\n...и ещё {len(закупки) - 5} контракт(ов)")
+    if total > 5:
+        lines.append(f"\n...и ещё {total - 5} дел(а)")
 
     return "\n".join(lines)
 
 
-def extract_connections(raw: dict) -> str:
-    """Извлекает учредителей и связанные компании."""
-    lines = ["🔗 <b>Связи</b>\n"]
+def format_contracts(resp: dict) -> str:
+    """
+    Форматирует ответ /v2/contracts.
+
+    data.Записи: [{РегНомер, СтрЕИС, Дата, Цена,
+                   Заказ: {НаимСокр}, Объекты: [{Наим}]}]
+    """
+    data = resp.get("data") or {}
+    records = data.get("Записи") or []
+    total = data.get("ЗапВсего") or 0
+
+    if not records:
+        return "💰 Госконтрактов по 44-ФЗ не найдено."
+
+    lines = [f"💰 <b>Госзакупки 44-ФЗ</b> (всего: {total})\n"]
+
+    for contract in records[:5]:
+        number = contract.get("РегНомер") or "—"
+        date = contract.get("Дата") or "—"
+        price = contract.get("Цена")
+        url = contract.get("СтрЕИС") or ""
+        objects = contract.get("Объекты") or []
+        subject = objects[0].get("Наим") if objects else ""
+        customer = (contract.get("Заказ") or {}).get("НаимСокр") or ""
+
+        line = f"• {number} от {date}"
+        if customer:
+            line += f"\n  Заказчик: {customer}"
+        if subject:
+            short = subject[:70] + "…" if len(subject) > 70 else subject
+            line += f"\n  Предмет: {short}"
+        if price is not None:
+            line += f"\n  Цена: {price:,} руб."
+        if url:
+            line += f'\n  <a href="{url}">ЕИС закупки</a>'
+        lines.append(line)
+
+    if total > 5:
+        lines.append(f"\n...и ещё {total - 5} контракт(ов)")
+
+    return "\n".join(lines)
+
+
+def format_connections(raw: dict) -> str:
+    """
+    Форматирует связи из объекта data /v2/company.
+
+    Поля: Руководители[{ФИО, Должн}], Учредители[{НаимПолн/ФИО, ИНН, ДоляПроцент}]
+    """
+    lines = ["🔗 <b>Связи компании</b>"]
+
+    руководители = raw.get("Руководители") or []
+    if isinstance(руководители, list) and руководители:
+        lines.append("\n<b>Руководители:</b>")
+        for р in руководители[:5]:
+            fio = р.get("ФИО") or "—"
+            post = р.get("Должн") or р.get("Должность") or ""
+            entry = f"• {fio}"
+            if post:
+                entry += f" ({post})"
+            lines.append(entry)
 
     учредители = raw.get("Учредители") or []
-    if учредители:
-        lines.append("<b>Учредители:</b>")
+    if isinstance(учредители, list) and учредители:
+        lines.append("\n<b>Учредители:</b>")
         for у in учредители[:5]:
-            имя = у.get("НазваниеПолное") or у.get("ФИО") or у.get("Имя") or "—"
+            name = у.get("НаимПолн") or у.get("НаимСокр") or у.get("ФИО") or "—"
+            inn = у.get("ИНН") or ""
             доля = у.get("ДоляПроцент") or у.get("Доля") or ""
-            строка = f"• {имя}"
+            entry = f"• {name}"
+            if inn:
+                entry += f" (ИНН: {inn})"
             if доля:
-                строка += f" ({доля}%)"
-            lines.append(строка)
-
-    связанные = raw.get("СвязанныеКомпании") or raw.get("Аффилированные") or []
-    if связанные:
-        lines.append("\n<b>Связанные компании:</b>")
-        for с in связанные[:5]:
-            название = с.get("НазваниеПолное") or с.get("Название") or "—"
-            инн = с.get("ИНН") or ""
-            строка = f"• {название}"
-            if инн:
-                строка += f" (ИНН: {инн})"
-            lines.append(строка)
+                entry += f" [{доля}%]"
+            lines.append(entry)
 
     if len(lines) == 1:
-        return "🔗 Данные о связях недоступны."
+        return "🔗 Данные о руководителях и учредителях недоступны."
 
     return "\n".join(lines)
