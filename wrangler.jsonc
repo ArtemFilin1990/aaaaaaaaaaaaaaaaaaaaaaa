@@ -1,0 +1,52 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "cloudflare-worker-mcp",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-01-12",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"observability": {
+		"logs": {
+			"enabled": true
+		},
+		"traces": {
+			"enabled": true
+		}
+	},
+	"vars": {
+		"CLOUDFLARE_API_BASE": "https://api.cloudflare.com/client/v4",
+		"OPENAPI_SPEC_URL": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json"
+	},
+	"worker_loaders": [
+		{
+			"binding": "LOADER"
+		}
+	],
+	"services": [
+		{
+			"binding": "GLOBAL_OUTBOUND",
+			"service": "cloudflare-worker-mcp",
+			"entrypoint": "GlobalOutbound"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "OAUTH_KV",
+			"id": "00000000000000000000000000000000"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "SPEC_BUCKET",
+			"bucket_name": "cloudflare-worker-mcp-spec"
+		}
+	],
+	"triggers": {
+		"crons": ["0 0 * * *"]
+	},
+	"dev": {
+		"port": 8788
+	}
+}

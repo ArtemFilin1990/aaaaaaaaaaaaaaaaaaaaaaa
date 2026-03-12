@@ -1,0 +1,435 @@
+import { env as cloudflareEnv } from "cloudflare:workers";
+import { Hono } from "hono";
+import { z } from "zod";
+
+import {
+  generatePKCECodes,
+  getAuthorizationURL,
+  getAuthToken,
+  refreshAuthToken,
+} from "./cloudflare-auth";
+import { ALL_SCOPES, SCOPE_TEMPLATES, DEFAULT_TEMPLATE, MAX_SCOPES } from "./scopes";
+import { UserSchema, AccountsSchema, type AuthProps, type AccountSchema } from "./types";
+import {
+  clientIdAlreadyApproved,
+  createOAuthState,
+  bindStateToSession,
+  generateCSRFProtection,
+  parseRedirectApproval,
+  renderApprovalDialog,
+  renderErrorPage,
+  validateOAuthState,
+  OAuthError,
+} from "./workers-oauth-utils";
+
+import type {
+  AuthRequest,
+  OAuthHelpers,
+  TokenExchangeCallbackOptions,
+  TokenExchangeCallbackResult,
+} from "@cloudflare/workers-oauth-provider";
+
+interface AuthEnv extends Env {
+  OAUTH_PROVIDER: OAuthHelpers;
+}
+
+const env = cloudflareEnv as AuthEnv;
+
+function throwCombinedCloudflareApiError(userStatus: number, accountsStatus: number): never {
+  const statuses = [userStatus, accountsStatus];
+
+  if (statuses.some((status) => status >= 500)) {
+    throw new OAuthError("server_error", "Cloudflare API is temporarily unavailable", 502);
+  }
+
+  if (statuses.includes(429)) {
+    throw new OAuthError("temporarily_unavailable", "Rate limited, try again later", 429);
+  }
+
+  if (statuses.includes(401)) {
+    throw new OAuthError("invalid_token", "Access token is invalid or expired", 401);
+  }
+
+  if (statuses.includes(403)) {
+    throw new OAuthError("insufficient_scope", "Insufficient permissions", 403);
+  }
+
+  throw new OAuthError("invalid_token", "Failed to verify token", userStatus);
+}
+
+async function fetchCloudflareProbes(accessToken: string): Promise<[Response, Response]> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  try {
+    return await Promise.all([
+      fetch(`${env.CLOUDFLARE_API_BASE}/user`, { headers }),
+      fetch(`${env.CLOUDFLARE_API_BASE}/accounts`, { headers }),
+    ]);
+  } catch (error) {
+    console.error("Cloudflare API request failed", error);
+    throw new OAuthError("server_error", "Cloudflare API is temporarily unavailable", 502);
+  }
+}
+
+/**
+ * Fetch user and accounts from Cloudflare API
+ */
+export async function getUserAndAccounts(accessToken: string): Promise<{
+  user: UserSchema | null;
+  accounts: AccountSchema[];
+}> {
+  const [userResp, accountsResp] = await fetchCloudflareProbes(accessToken);
+
+  // Check for upstream errors before parsing
+  if (!userResp.ok && !accountsResp.ok) {
+    console.error(`Cloudflare API error: user=${userResp.status}, accounts=${accountsResp.status}`);
+    throwCombinedCloudflareApiError(userResp.status, accountsResp.status);
+  }
+
+  // Parse user from response
+  let user: UserSchema | null = null;
+  if (userResp.ok) {
+    try {
+      const json = (await userResp.json()) as { success?: boolean; result?: unknown };
+      if (json.success && json.result) {
+        const parsed = UserSchema.safeParse(json.result);
+        if (parsed.success) {
+          user = parsed.data;
+        } else {
+          console.error("Cloudflare API /user payload did not match expected shape", parsed.error);
+        }
+      }
+    } catch (error) {
+      console.error("Cloudflare API /user response is not valid JSON", error);
+    }
+  }
+
+  // Parse accounts from response
+  let accounts: AccountSchema[] = [];
+  if (accountsResp.ok) {
+    try {
+      const json = (await accountsResp.json()) as { success?: boolean; result?: unknown };
+      if (json.success && json.result) {
+        const parsed = AccountsSchema.safeParse(json.result);
+        if (parsed.success) {
+          accounts = parsed.data;
+        } else {
+          console.error(
+            "Cloudflare API /accounts payload did not match expected shape",
+            parsed.error,
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Cloudflare API /accounts response is not valid JSON", error);
+    }
+  }
+
+  if (user) {
+    return { user, accounts };
+  }
+
+  // Account-scoped token - user will be null
+  if (accounts.length > 0) {
+    return { user: null, accounts };
+  }
+
+  throw new OAuthError(
+    "invalid_token",
+    "Failed to verify token: no user or account information",
+    401,
+  );
+}
+
+/**
+ * Handle token refresh for workers-oauth-provider
+ */
+export async function handleTokenExchangeCallback(
+  options: TokenExchangeCallbackOptions,
+  clientId: string,
+  clientSecret: string,
+): Promise<TokenExchangeCallbackResult | undefined> {
+  if (options.grantType !== "refresh_token") {
+    return undefined;
+  }
+
+  const AuthPropsSchema = z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("account_token"),
+      accessToken: z.string(),
+      account: z.object({ id: z.string(), name: z.string() }),
+    }),
+    z.object({
+      type: z.literal("user_token"),
+      accessToken: z.string(),
+      user: z.object({ id: z.string(), email: z.string() }),
+      accounts: z.array(z.object({ id: z.string(), name: z.string() })),
+      refreshToken: z.string().optional(),
+    }),
+  ]);
+
+  const props = AuthPropsSchema.parse(options.props);
+
+  if (props.type !== "user_token" || !props.refreshToken) {
+    return undefined;
+  }
+
+  const { access_token, refresh_token, expires_in } = await refreshAuthToken({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: props.refreshToken,
+  });
+
+  return {
+    newProps: {
+      ...props,
+      accessToken: access_token,
+      refreshToken: refresh_token,
+    } satisfies AuthProps,
+    accessTokenTTL: expires_in,
+  };
+}
+
+/**
+ * Redirect to Cloudflare OAuth with selected scopes
+ */
+async function redirectToCloudflare(
+  requestUrl: string,
+  oauthReqInfo: AuthRequest,
+  stateToken: string,
+  codeChallenge: string,
+  scopes: string[],
+  additionalHeaders: Record<string, string> = {},
+): Promise<Response> {
+  const stateWithToken: AuthRequest = {
+    ...oauthReqInfo,
+    state: stateToken,
+  };
+
+  const { authUrl } = await getAuthorizationURL({
+    client_id: env.CLOUDFLARE_CLIENT_ID,
+    redirect_uri: new URL("/oauth/callback", requestUrl).href,
+    state: stateWithToken,
+    scopes,
+    codeChallenge,
+  });
+
+  return new Response(null, {
+    status: 302,
+    headers: {
+      ...additionalHeaders,
+      Location: authUrl,
+    },
+  });
+}
+
+/**
+ * Create OAuth route handlers using patterns from workers-oauth-provider
+ */
+export function createAuthHandlers() {
+  const app = new Hono();
+
+  // GET /authorize - Show consent dialog or redirect if previously approved
+  app.get("/authorize", async (c) => {
+    try {
+      const oauthReqInfo = await env.OAUTH_PROVIDER.parseAuthRequest(c.req.raw);
+      // Use default template scopes initially
+      const defaultScopes = [...SCOPE_TEMPLATES[DEFAULT_TEMPLATE].scopes];
+      oauthReqInfo.scope = defaultScopes;
+
+      if (!oauthReqInfo.clientId) {
+        return new OAuthError("invalid_request", "Missing client_id").toHtmlResponse();
+      }
+
+      // Check if client was previously approved - skip consent if so
+      if (
+        await clientIdAlreadyApproved(
+          c.req.raw,
+          oauthReqInfo.clientId,
+          env.MCP_COOKIE_ENCRYPTION_KEY,
+        )
+      ) {
+        const { codeChallenge, codeVerifier } = await generatePKCECodes();
+        const stateToken = await createOAuthState(oauthReqInfo, env.OAUTH_KV, codeVerifier);
+        const { setCookie: sessionCookie } = await bindStateToSession(stateToken);
+
+        return redirectToCloudflare(
+          c.req.url,
+          oauthReqInfo,
+          stateToken,
+          codeChallenge,
+          defaultScopes,
+          {
+            "Set-Cookie": sessionCookie,
+          },
+        );
+      }
+
+      // Client not approved - show consent dialog with scope selection
+      const { token: csrfToken, setCookie: csrfCookie } = generateCSRFProtection();
+
+      return renderApprovalDialog(c.req.raw, {
+        client: await env.OAUTH_PROVIDER.lookupClient(oauthReqInfo.clientId),
+        server: {
+          name: "Cloudflare API MCP",
+          logo: "https://www.cloudflare.com/favicon.ico",
+          description: "Access the Cloudflare API through the Model Context Protocol.",
+        },
+        state: { oauthReqInfo },
+        csrfToken,
+        setCookie: csrfCookie,
+        scopeTemplates: SCOPE_TEMPLATES,
+        allScopes: ALL_SCOPES,
+        defaultTemplate: DEFAULT_TEMPLATE,
+        maxScopes: MAX_SCOPES,
+      });
+    } catch (e) {
+      if (e instanceof OAuthError) return e.toHtmlResponse();
+      const errorId = crypto.randomUUID();
+      console.error(`Authorize error [${errorId}]:`, e);
+      return renderErrorPage(
+        "Server Error",
+        "An unexpected error occurred. Please try again.",
+        `Error ID: ${errorId}`,
+        500,
+      );
+    }
+  });
+
+  // POST /authorize - Handle consent form submission
+  app.post("/authorize", async (c) => {
+    try {
+      const { state, headers, selectedScopes } = await parseRedirectApproval(
+        c.req.raw,
+        env.MCP_COOKIE_ENCRYPTION_KEY,
+      );
+
+      if (!state.oauthReqInfo) {
+        return new OAuthError("invalid_request", "Missing OAuth request info").toHtmlResponse();
+      }
+
+      const oauthReqInfo = state.oauthReqInfo as AuthRequest;
+
+      // Checkboxes are the source of truth — accept whatever the frontend sends
+      const scopesToRequest = (
+        selectedScopes && selectedScopes.length > 0 ? selectedScopes : []
+      ).slice(0, MAX_SCOPES);
+
+      // Update oauthReqInfo with selected scopes
+      oauthReqInfo.scope = scopesToRequest;
+
+      // Create OAuth state and bind to session
+      const { codeChallenge, codeVerifier } = await generatePKCECodes();
+      const stateToken = await createOAuthState(oauthReqInfo, env.OAUTH_KV, codeVerifier);
+      const { setCookie: sessionCookie } = await bindStateToSession(stateToken);
+
+      const redirectResponse = await redirectToCloudflare(
+        c.req.url,
+        oauthReqInfo,
+        stateToken,
+        codeChallenge,
+        scopesToRequest,
+      );
+
+      // Add both cookies
+      if (headers["Set-Cookie"]) {
+        redirectResponse.headers.append("Set-Cookie", headers["Set-Cookie"]);
+      }
+      redirectResponse.headers.append("Set-Cookie", sessionCookie);
+
+      return redirectResponse;
+    } catch (e) {
+      if (e instanceof OAuthError) return e.toHtmlResponse();
+      const errorId = crypto.randomUUID();
+      console.error(`Authorize POST error [${errorId}]:`, e);
+      return renderErrorPage(
+        "Server Error",
+        "An unexpected error occurred. Please try again.",
+        `Error ID: ${errorId}`,
+        500,
+      );
+    }
+  });
+
+  // GET /oauth/callback - Handle Cloudflare OAuth redirect
+  app.get("/oauth/callback", async (c) => {
+    try {
+      const code = c.req.query("code");
+      if (!code) {
+        return new OAuthError("invalid_request", "Missing code").toHtmlResponse();
+      }
+
+      // Validate state using dual validation (KV + session cookie)
+      const { oauthReqInfo, codeVerifier, clearCookie } = await validateOAuthState(
+        c.req.raw,
+        env.OAUTH_KV,
+      );
+
+      if (!oauthReqInfo.clientId) {
+        return new OAuthError("invalid_request", "Invalid OAuth request info").toHtmlResponse();
+      }
+
+      // Exchange code for tokens and ensure client is registered
+      const [{ access_token, refresh_token }] = await Promise.all([
+        getAuthToken({
+          client_id: env.CLOUDFLARE_CLIENT_ID,
+          client_secret: env.CLOUDFLARE_CLIENT_SECRET,
+          redirect_uri: new URL("/oauth/callback", c.req.url).href,
+          code,
+          code_verifier: codeVerifier,
+        }),
+        env.OAUTH_PROVIDER.createClient({
+          clientId: oauthReqInfo.clientId,
+          tokenEndpointAuthMethod: "none",
+        }),
+      ]);
+
+      // Fetch user and accounts
+      const { user, accounts } = await getUserAndAccounts(access_token);
+
+      // Account-scoped tokens (user: null) are only supported via API token mode
+      // (see api-token-mode.ts). The OAuth flow always requires a user identity.
+      if (!user) {
+        return new OAuthError(
+          "server_error",
+          "Failed to fetch user information from Cloudflare",
+        ).toHtmlResponse();
+      }
+
+      // Complete authorization
+      const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+        request: oauthReqInfo,
+        userId: user.id,
+        metadata: { label: user.email },
+        scope: oauthReqInfo.scope,
+        props: {
+          type: "user_token",
+          user,
+          accounts,
+          accessToken: access_token,
+          refreshToken: refresh_token,
+        } satisfies AuthProps,
+      });
+
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: redirectTo,
+          "Set-Cookie": clearCookie,
+        },
+      });
+    } catch (e) {
+      if (e instanceof OAuthError) return e.toHtmlResponse();
+      const errorId = crypto.randomUUID();
+      console.error(`Callback error [${errorId}]:`, e);
+      return renderErrorPage(
+        "Server Error",
+        "An unexpected error occurred during authorization.",
+        `Error ID: ${errorId}`,
+        500,
+      );
+    }
+  });
+
+  return app;
+}
