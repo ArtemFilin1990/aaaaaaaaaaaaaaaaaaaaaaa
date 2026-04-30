@@ -1,123 +1,95 @@
-# Cloudflare Worker MCP
+# Bitrix24 company deduplication by INN
 
-Подпроект в `MCP/` добавляет отдельный `Cloudflare Worker` MCP-сервер на базе [`cloudflare/mcp`](https://github.com/cloudflare/mcp) и паттерна `Code Mode` через `Worker Loader`.
+Репозиторий оставлен под одну задачу: безопасное объединение дублей компаний в Bitrix24 Cloud через REST webhook.
 
-Сервер предоставляет два MCP tools:
+## Что делает скрипт
 
-- `search` — поиск по Cloudflare OpenAPI spec;
-- `execute` — выполнение Cloudflare API вызовов через изолированный worker.
+Скрипт `scripts/bitrix_merge_company_duplicates_by_inn.py`:
 
-Реализация опирается на:
+- проверяет все компании CRM без фильтра по ответственному;
+- ищет дубли только по нормализованному ИНН;
+- берёт ИНН из `UF_CRM_4_IF_INN` и `RQ_INN` реквизитов;
+- использует ОГРН/ОГРНИП только как защиту от ошибочного слияния;
+- выбирает победителя по приоритету ответственного;
+- переносит данные и связи дублей в пользу победителя, если это безопасно через REST API;
+- не меняет ответственных;
+- не переименовывает компании;
+- не добавляет `[ДУБЛЬ]`;
+- не пишет служебные комментарии;
+- не переводит компании на `НЕ ЗВОНИТЬ`;
+- не удаляет компании вручную.
 
-- [`worker-loader`](https://developers.cloudflare.com/workers/runtime-apis/bindings/worker-loader/)
-- [`workers-oauth-provider`](https://github.com/cloudflare/workers-oauth-provider)
-- upstream reference: [`cloudflare/mcp`](https://github.com/cloudflare/mcp)
+## Приоритет победителя
 
-## Что внутри
+1. Активный менеджер.
+2. Техническая воронка.
+3. Неизвестный пользователь.
+4. Неактивный пользователь.
+5. `НЕ ЗВОНИТЬ`.
 
-- `src/index.ts` — `fetch`/`scheduled` entrypoint и OAuth/API-token обработка.
-- `src/server.ts` — регистрация MCP tools `search` и `execute`.
-- `src/executor.ts` — запуск сгенерированного кода внутри `Worker Loader`.
-- `src/auth/*` — OAuth flow и scope management.
-- `scripts/seed-r2.ts` — загрузка подготовленного OpenAPI spec в `R2`.
+Если в группе есть активный менеджер, победитель выбирается среди активных менеджеров. Если активных менеджеров несколько, победитель выбирается по последней активности.
 
 ## Установка
 
 ```bash
-cd MCP
-npm install
+cp .env.example .env
 ```
 
-## Конфигурация Cloudflare
+В `.env` укажите webhook:
 
-1. Создайте `R2` bucket:
-
-```bash
-npx wrangler r2 bucket create cloudflare-worker-mcp-spec
+```env
+BITRIX_WEBHOOK_URL=https://your-domain.bitrix24.ru/rest/USER_ID/WEBHOOK_CODE/
+REQUEST_DELAY=0.3
+REPORTS_DIR=reports
 ```
 
-2. Создайте `KV` namespace для OAuth state/storage:
-
-```bash
-npx wrangler kv namespace create OAUTH_KV
-```
-
-3. Подставьте полученный `id` в `wrangler.jsonc` вместо `00000000000000000000000000000000`.
-
-4. Если нужен OAuth flow, задайте секреты:
-
-```bash
-npx wrangler secret put MCP_COOKIE_ENCRYPTION_KEY
-npx wrangler secret put CLOUDFLARE_CLIENT_ID
-npx wrangler secret put CLOUDFLARE_CLIENT_SECRET
-```
-
-Для локальной разработки можно создать `.dev.vars` по образцу `.dev.vars.example`.
-
-## Первичная загрузка spec
-
-Перед первым удалённым запуском загрузите подготовленный OpenAPI spec в `R2`:
-
-```bash
-npm run seed
-```
+Webhook хранить только в `.env` или переменных окружения. Не коммитить реальные токены.
 
 ## Запуск
 
-Локальная разработка:
-
-```bash
-npm run dev
-```
-
-Локальный MCP endpoint будет доступен через `wrangler dev`; основной маршрут MCP — `POST /mcp`.
-
-Проверки:
-
-```bash
-npm run check
-```
-
-Деплой:
-
-```bash
-npm run deploy
-```
-
-## Ограничения
-
-- `search` зависит от наличия `spec.json` и `products.json` в `R2`.
-- `execute` работает только против `env.CLOUDFLARE_API_BASE` и блокирует произвольный outbound traffic через `GlobalOutbound`.
-- Direct API token mode поддерживается без OAuth redirect flow, но OAuth-секреты всё равно нужны, если вы хотите авторизацию через `/authorize`.
-
-## Bitrix24 company deduplication by INN
-
-Production-safe script: `scripts/bitrix_merge_company_duplicates_by_inn.py`.
-
-### Setup
-
-1. Copy `.env.example` and set `BITRIX_WEBHOOK_URL`.
-2. Keep webhook only in environment variables.
-3. Script writes plans/logs into `reports/`.
-
-### Run
+Audit — только чтение:
 
 ```bash
 python scripts/bitrix_merge_company_duplicates_by_inn.py --audit
+```
+
+Dry-run — строит план, но ничего не меняет:
+
+```bash
 python scripts/bitrix_merge_company_duplicates_by_inn.py --dry-run
+```
+
+Apply — применяет свежий план из `reports/merge_plan.json`:
+
+```bash
 python scripts/bitrix_merge_company_duplicates_by_inn.py --apply
 ```
 
-Optional safety flags:
+## Дополнительные флаги
 
-- `--allow-unknown-user-merge`
-- `--allow-ogrn-conflict-merge`
-- `--allow-active-to-active-merge`
+```bash
+--allow-unknown-user-merge
+--allow-ogrn-conflict-merge
+--allow-active-to-active-merge
+```
 
-### Safety behavior
+По умолчанию спорные группы блокируются и требуют ручной проверки.
 
-- Duplicate key is strictly normalized INN (10/12 digits).
-- OGRN/OGRNIP mismatch blocks apply unless explicitly allowed.
-- `--audit` / `--dry-run` are read-only.
-- `--apply` requires a fresh `reports/merge_plan.json` (≤24h old).
-- Script never reassigns responsible users, renames, marks, or manually deletes companies.
+## Файлы результата
+
+- `reports/merge_plan.json` — план объединения после dry-run.
+- `reports/errors.log` — ошибки и конфликты apply.
+
+## Безопасность
+
+- `--audit` и `--dry-run` не вызывают write-методы.
+- `--apply` требует план не старше 24 часов.
+- Заполненные поля победителя не затираются автоматически.
+- `PHONE`, `EMAIL`, `WEB` объединяются уникальными значениями.
+- Группы с конфликтом ОГРН/ОГРНИП блокируются без отдельного флага.
+- Webhook, token и полный REST URL не печатаются.
+
+## Ограничения
+
+- Банковские реквизиты и активности не переносятся автоматически по умолчанию: нужен отдельный безопасный сценарий под фактическую схему Bitrix24.
+- Если нужный REST-метод недоступен на портале, соответствующая часть переноса пропускается и пишется в `reports/errors.log`.
