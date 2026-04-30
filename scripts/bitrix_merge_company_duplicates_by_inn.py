@@ -8,7 +8,6 @@ import re
 import sys
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,14 @@ ACTIVE_MANAGERS = {
     "1211": "Надежда Третьякова",
     "1219": "Аванес Алексанян",
 }
-FUNNEL_USERS = {"911": "СВОБОДНЫЕ КОМПАНИИ", "15": "НЕ ЗАКУПАЮТ", "21": "ТЕНДЕРЫ", "19": "НЕДОЗВОНЫ", "75": "ПЕРЕКУПЫ", "23": "НОВЫЕ КОМПАНИИ"}
+FUNNEL_USERS = {
+    "911": "СВОБОДНЫЕ КОМПАНИИ",
+    "15": "НЕ ЗАКУПАЮТ",
+    "21": "ТЕНДЕРЫ",
+    "19": "НЕДОЗВОНЫ",
+    "75": "ПЕРЕКУПЫ",
+    "23": "НОВЫЕ КОМПАНИИ",
+}
 INACTIVE_USERS = {
     "17": "Елена Коробова",
     "27": "Зинаида Филинцева",
@@ -43,7 +49,13 @@ INACTIVE_USERS = {
     "537": "Анастасия Жебуртович",
     "629": "Pavel Zhukov",
 }
-OWNER_PRIORITY = {"ACTIVE_MANAGER": 1, "FUNNEL_USER": 2, "UNKNOWN_USER": 3, "INACTIVE_USER": 4, "NOT_CALL": 5}
+OWNER_PRIORITY = {
+    "ACTIVE_MANAGER": 1,
+    "FUNNEL_USER": 2,
+    "UNKNOWN_USER": 3,
+    "INACTIVE_USER": 4,
+    "NOT_CALL": 5,
+}
 
 
 class BitrixError(RuntimeError):
@@ -136,13 +148,27 @@ def classify_owner(assigned_by_id: Any) -> str:
 
 
 def load_all_companies(client: BitrixClient, page_size: int) -> list[dict[str, Any]]:
-    return client.paginated_list("crm.company.list", {"select": ["*", "UF_*"], "order": {"ID": "ASC"}, "limit": page_size})
+    return client.paginated_list(
+        "crm.company.list",
+        {"select": ["*", "UF_*"], "order": {"ID": "ASC"}, "limit": page_size},
+    )
 
 
-def load_company_requisites(client: BitrixClient, company_ids: list[str], page_size: int) -> dict[str, list[dict[str, Any]]]:
+def load_company_requisites(
+    client: BitrixClient,
+    company_ids: list[str],
+    page_size: int,
+) -> dict[str, list[dict[str, Any]]]:
     reqs: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for cid in company_ids:
-        rows = client.paginated_list("crm.requisite.list", {"filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": cid}, "select": ["*"], "limit": page_size})
+        rows = client.paginated_list(
+            "crm.requisite.list",
+            {
+                "filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": cid},
+                "select": ["*"],
+                "limit": page_size,
+            },
+        )
         reqs[cid].extend(rows)
     return reqs
 
@@ -150,7 +176,15 @@ def load_company_requisites(client: BitrixClient, company_ids: list[str], page_s
 def load_group_activities(client: BitrixClient, company_ids: list[str], page_size: int) -> dict[str, datetime | None]:
     last_activity: dict[str, datetime | None] = {}
     for cid in company_ids:
-        rows = client.paginated_list("crm.activity.list", {"filter": {"OWNER_TYPE_ID": 4, "OWNER_ID": cid}, "order": {"LAST_UPDATED": "DESC"}, "select": ["LAST_UPDATED", "CREATED"], "limit": 1})
+        rows = client.paginated_list(
+            "crm.activity.list",
+            {
+                "filter": {"OWNER_TYPE_ID": 4, "OWNER_ID": cid},
+                "order": {"LAST_UPDATED": "DESC"},
+                "select": ["LAST_UPDATED", "CREATED"],
+                "limit": 1,
+            },
+        )
         last_activity[cid] = parse_dt(rows[0].get("LAST_UPDATED") or rows[0].get("CREATED")) if rows else None
     return last_activity
 
@@ -199,11 +233,21 @@ def select_winner(group: list[dict[str, Any]]) -> dict[str, Any]:
     return sorted(group, key=sort_key)[0]
 
 
-def merge_fields_into_winner(winner: dict[str, Any], loser: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def merge_fields_into_winner(
+    winner: dict[str, Any],
+    loser: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     updates: dict[str, Any] = {}
     conflicts: list[dict[str, Any]] = []
+    transferable_fields = {
+        "ADDRESS",
+        "ADDRESS_CITY",
+        "ADDRESS_REGION",
+        "ADDRESS_COUNTRY",
+        "ADDRESS_POSTAL_CODE",
+    }
     for k, v in loser.items():
-        if not (k.startswith("UF_") or k in {"ADDRESS", "ADDRESS_CITY", "ADDRESS_REGION", "ADDRESS_COUNTRY", "ADDRESS_POSTAL_CODE"}):
+        if not (k.startswith("UF_") or k in transferable_fields):
             continue
         if v in (None, "", []):
             continue
@@ -215,11 +259,15 @@ def merge_fields_into_winner(winner: dict[str, Any], loser: dict[str, Any]) -> t
     return updates, conflicts
 
 
-def merge_communications(winner: dict[str, Any], loser: dict[str, Any]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+def merge_communications(
+    winner: dict[str, Any],
+    loser: dict[str, Any],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
     merged, adds = {}, {}
     for key in ("PHONE", "EMAIL", "WEB"):
         w = winner.get(key) or []
         l = loser.get(key) or []
+        winner_values = {str(x.get("VALUE", "")).strip().lower() for x in w}
         uniq, seen = [], set()
         for entry in [*w, *l]:
             val = str(entry.get("VALUE", "")).strip().lower()
@@ -229,12 +277,15 @@ def merge_communications(winner: dict[str, Any], loser: dict[str, Any]) -> tuple
             uniq.append(entry)
         if uniq != w:
             merged[key] = uniq
-            adds[key] = [entry for entry in uniq if str(entry.get("VALUE", "")).strip().lower() not in {str(x.get("VALUE", "")).strip().lower() for x in w}]
+            adds[key] = [entry for entry in uniq if str(entry.get("VALUE", "")).strip().lower() not in winner_values]
     return merged, adds
 
 
 def get_company_deal_ids(client: BitrixClient, company_id: str) -> list[str]:
-    deals = client.paginated_list("crm.deal.list", {"filter": {"COMPANY_ID": company_id}, "select": ["ID"], "limit": 50})
+    deals = client.paginated_list(
+        "crm.deal.list",
+        {"filter": {"COMPANY_ID": company_id}, "select": ["ID"], "limit": 50},
+    )
     return [str(deal["ID"]) for deal in deals]
 
 
@@ -249,7 +300,10 @@ def get_company_contact_ids(client: BitrixClient, company_id: str) -> list[str]:
 
 
 def get_company_requisites(client: BitrixClient, company_id: str, page_size: int) -> list[dict[str, Any]]:
-    return client.paginated_list("crm.requisite.list", {"filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": company_id}, "select": ["*"], "limit": page_size})
+    return client.paginated_list(
+        "crm.requisite.list",
+        {"filter": {"ENTITY_TYPE_ID": 4, "ENTITY_ID": company_id}, "select": ["*"], "limit": page_size},
+    )
 
 
 def requisite_key(req: dict[str, Any]) -> tuple[str, str, str, str]:
@@ -266,7 +320,14 @@ def append_error(errors_path: Path, message: str) -> None:
         fh.write(f"{datetime.now(timezone.utc).isoformat()} {message}\n")
 
 
-def build_merge_plan(groups: dict[str, list[dict[str, Any]]], allow_unknown: bool, allow_ogrn_conflict: bool, client: BitrixClient, page_size: int = 50) -> dict[str, Any]:
+def build_merge_plan(
+    groups: dict[str, list[dict[str, Any]]],
+    allow_unknown: bool,
+    allow_ogrn_conflict: bool,
+    allow_active_to_active: bool,
+    client: BitrixClient,
+    page_size: int = 50,
+) -> dict[str, Any]:
     plan_groups = []
     methods = set(client.call("methods") or [])
     has_contact_add = "crm.company.contact.add" in methods
@@ -277,6 +338,11 @@ def build_merge_plan(groups: dict[str, list[dict[str, Any]]], allow_unknown: boo
         ogrn_conflict = detect_ogrn_conflict(group)
         warnings = []
         allowed = True
+
+        active_manager_count = sum(1 for x in group if x["owner_group"] == "ACTIVE_MANAGER")
+        if active_manager_count > 1 and not allow_active_to_active:
+            warnings.append("MANUAL_REVIEW_REQUIRED: multiple active managers")
+            allowed = False
         if ogrn_conflict and not allow_ogrn_conflict:
             warnings.append("MANUAL_REVIEW_REQUIRED: OGRN/OGRNIP conflict")
             allowed = False
@@ -329,24 +395,27 @@ def build_merge_plan(groups: dict[str, list[dict[str, Any]]], allow_unknown: boo
             warnings.append("MANUAL_REVIEW_REQUIRED: crm.requisite.update unavailable")
             allowed = False
 
-        plan_groups.append({
-            "inn": inn,
-            "winner_id": str(winner["company"]["ID"]),
-            "winner_owner_group": winner["owner_group"],
-            "loser_ids": [str(x["company"]["ID"]) for x in losers],
-            "ogrn_conflict": ogrn_conflict,
-            "fields_to_fill": field_transfers,
-            "communication_merge": communication_transfers,
-            "deals_to_move": deals_to_move,
-            "contacts_to_bind": contacts_to_bind,
-            "requisites_to_move": requisites_to_move,
-            "requisite_conflicts": requisites_conflicts,
-            "bank_details_status": bank_details_status,
-            "activities_notes_status": activities_status,
-            "field_conflicts": field_conflicts,
-            "warnings": warnings,
-            "allowed_for_apply": allowed,
-        })
+        plan_groups.append(
+            {
+                "inn": inn,
+                "winner_id": str(winner["company"]["ID"]),
+                "winner_owner_group": winner["owner_group"],
+                "loser_ids": [str(x["company"]["ID"]) for x in losers],
+                "active_manager_count": active_manager_count,
+                "ogrn_conflict": ogrn_conflict,
+                "fields_to_fill": field_transfers,
+                "communication_merge": communication_transfers,
+                "deals_to_move": deals_to_move,
+                "contacts_to_bind": contacts_to_bind,
+                "requisites_to_move": requisites_to_move,
+                "requisite_conflicts": requisites_conflicts,
+                "bank_details_status": bank_details_status,
+                "activities_notes_status": activities_status,
+                "field_conflicts": field_conflicts,
+                "warnings": warnings,
+                "allowed_for_apply": allowed,
+            }
+        )
     return {"generated_at": datetime.now(timezone.utc).isoformat(), "groups": plan_groups, "page_size": page_size}
 
 
@@ -453,15 +522,30 @@ def main() -> int:
         if cid in activities:
             row["last_activity"] = activities[cid]
 
-    print(f"AUDIT total={len(companies)} with_valid_inn={with_inn} without_valid_inn={len(companies)-with_inn} duplicate_groups={len(groups)} owner_groups={dict(owner_counts)}")
+    print(
+        f"AUDIT total={len(companies)} with_valid_inn={with_inn} "
+        f"without_valid_inn={len(companies)-with_inn} duplicate_groups={len(groups)} "
+        f"owner_groups={dict(owner_counts)}"
+    )
     if args.audit:
         return 0
 
-    plan = build_merge_plan(groups, args.allow_unknown_user_merge, args.allow_ogrn_conflict_merge, client, page_size)
+    plan = build_merge_plan(
+        groups,
+        args.allow_unknown_user_merge,
+        args.allow_ogrn_conflict_merge,
+        args.allow_active_to_active_merge,
+        client,
+        page_size,
+    )
     if args.dry_run:
         plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
         errors_path.touch(exist_ok=True)
-        print(f"DRY-RUN groups={len(plan['groups'])} allowed={sum(1 for g in plan['groups'] if g['allowed_for_apply'])} blocked={sum(1 for g in plan['groups'] if not g['allowed_for_apply'])}")
+        print(
+            f"DRY-RUN groups={len(plan['groups'])} "
+            f"allowed={sum(1 for g in plan['groups'] if g['allowed_for_apply'])} "
+            f"blocked={sum(1 for g in plan['groups'] if not g['allowed_for_apply'])}"
+        )
         return 0
 
     if args.apply:
