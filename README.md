@@ -89,3 +89,35 @@ npm run deploy
 - `search` зависит от наличия `spec.json` и `products.json` в `R2`.
 - `execute` работает только против `env.CLOUDFLARE_API_BASE` и блокирует произвольный outbound traffic через `GlobalOutbound`.
 - Direct API token mode поддерживается без OAuth redirect flow, но OAuth-секреты всё равно нужны, если вы хотите авторизацию через `/authorize`.
+
+## Bitrix24 company deduplication by INN
+
+Production-safe script: `scripts/bitrix_merge_company_duplicates_by_inn.py`.
+
+### Setup
+
+1. Copy `.env.example` and set `BITRIX_WEBHOOK_URL`.
+2. Keep webhook only in environment variables.
+3. Script writes plans/logs into `reports/`.
+
+### Run
+
+```bash
+python scripts/bitrix_merge_company_duplicates_by_inn.py --audit
+python scripts/bitrix_merge_company_duplicates_by_inn.py --dry-run
+python scripts/bitrix_merge_company_duplicates_by_inn.py --apply
+```
+
+Optional safety flags:
+
+- `--allow-unknown-user-merge`
+- `--allow-ogrn-conflict-merge`
+- `--allow-active-to-active-merge`
+
+### Safety behavior
+
+- Duplicate key is strictly normalized INN (10/12 digits).
+- OGRN/OGRNIP mismatch blocks apply unless explicitly allowed.
+- `--audit` / `--dry-run` are read-only.
+- `--apply` requires a fresh `reports/merge_plan.json` (≤24h old).
+- Script never reassigns responsible users, renames, marks, or manually deletes companies.
