@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: everest
+      POSTGRES_USER: everest
+      POSTGRES_PASSWORD: everest
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://everest:everest@db:5432/everest?schema=public
+      B24_MODE: mock
+      B24_WRITE_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+volumes:
+  postgres_data:

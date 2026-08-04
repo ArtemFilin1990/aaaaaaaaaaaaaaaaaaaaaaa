@@ -1,0 +1,2 @@
+"use client";
+export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) { return <section className="mx-auto max-w-4xl px-5 py-24"><h1 className="text-4xl font-black">Ошибка загрузки страницы</h1><p className="mt-4 text-neutral-600">Повторите запрос. Если проблема сохраняется, зафиксируйте адрес страницы.</p><button onClick={reset} className="mt-6 rounded-md bg-signal px-5 py-3 font-semibold text-white">Повторить</button></section>; }

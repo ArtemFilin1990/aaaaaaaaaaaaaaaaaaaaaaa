@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AnalogStatus {
+  DIRECT
+  ONE_WAY
+  PARTIAL
+  SIZE_ONLY
+  NO_DIRECT
+  CONFLICT
+}
+
+enum EvidenceLevel {
+  A
+  B
+  C
+  R
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  sku         String   @unique
+  gost        String?
+  iso         String?
+  brand       String?
+  type        String
+  bore        Float
+  outside     Float
+  width       Float
+  isDemo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
