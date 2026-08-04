@@ -10,7 +10,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Upload lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+
   quality:
+    needs: lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -36,60 +57,41 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10.14.0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Generate lockfile when it is not committed yet
-        run: pnpm install --lockfile-only --no-frozen-lockfile
-
-      - name: Upload generated lockfile
-        uses: actions/upload-artifact@v4
+      - name: Download generated lockfile
+        uses: actions/download-artifact@v4
         with:
           name: pnpm-lock
-          path: pnpm-lock.yaml
-          if-no-files-found: error
-
+          path: .
       - name: Install dependencies reproducibly
         run: pnpm install --frozen-lockfile
-
       - name: Generate Prisma client
         run: pnpm prisma:generate
-
       - name: Check Prisma formatting
         run: |
           pnpm prisma:format
           git diff --exit-code -- prisma/schema.prisma
-
       - name: Validate Prisma schema
         run: pnpm prisma:validate
-
       - name: Apply database migrations
         run: pnpm prisma:migrate:deploy
-
       - name: Lint
         run: pnpm lint
-
       - name: Typecheck
         run: pnpm typecheck
-
       - name: Unit tests
         run: pnpm test
-
       - name: Production build
         run: pnpm build
-
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
-
       - name: Browser smoke tests
         run: pnpm test:e2e
-
       - name: Check standalone production runtime
         run: |
           cp -R public .next/standalone/public
@@ -105,7 +107,6 @@ jobs:
           cat /tmp/health.json
           curl --fail --silent http://127.0.0.1:3100/ > /dev/null
           kill "$(cat /tmp/everest-standalone.pid)"
-
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
