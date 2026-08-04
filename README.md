@@ -29,30 +29,52 @@
 - `docs/WORK_MODE.md`;
 - соответствующий файл из `tasks`.
 
-Задачи выполняются по одной в отдельных ветках `codex/*`. Если GitHub-аутентификация в среде недоступна, агент создаёт локальные коммиты и экспортирует patch-файлы и архив по процедуре из `docs/WORK_MODE.md`. Локальные коммиты нельзя считать опубликованными без удалённой ветки или Pull Request.
+Задачи выполняются по одной в отдельных ветках `codex/*`. Локальные коммиты нельзя считать опубликованными без удалённой ветки или Pull Request.
 
-Текущий первый этап:
+Текущие этапы:
 
-`tasks/01-baseline-stabilization.md`
-
-Шаблон новых задач:
-
-`tasks/TASK_TEMPLATE.md`
+- `tasks/01-baseline-stabilization.md`;
+- `tasks/02-catalog-data-model.md`.
 
 ## Локальный запуск
 
 ```bash
 cp .env.example .env
 pnpm install
+pnpm db:up
 pnpm prisma:generate
+pnpm prisma:migrate:deploy
+pnpm db:seed
 pnpm dev
 ```
 
 Откройте `http://localhost:3000`.
 
+## База данных
+
+Каноническая модель разделяет товар, обозначения ГОСТ/ISO, поисковые алиасы, стандартные соответствия, инженерные аналоги, документы и партии импорта.
+
+Seed создаёт 33 демонстрационные позиции. Они помечены как `DEMO`, не содержат публичных цен и не подтверждают наличие или срок.
+
+```bash
+pnpm db:seed
+pnpm db:studio
+pnpm db:reset
+```
+
+`db:reset` удаляет локальные данные и не должен выполняться на рабочей базе.
+
+Документация:
+
+- `docs/data-dictionary.md`;
+- `docs/catalog-architecture.md`;
+- `docs/local-database.md`.
+
 ## Проверки
 
 ```bash
+pnpm prisma:format
+pnpm prisma:validate
 pnpm lint
 pnpm typecheck
 pnpm test
