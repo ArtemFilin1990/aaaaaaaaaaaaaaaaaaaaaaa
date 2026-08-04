@@ -10,9 +10,9 @@
 
 ## Обнаруженные проблемы
 
-1. В репозитории отсутствовал `pnpm-lock.yaml`.
-2. CI использовал `pnpm install --no-frozen-lockfile`.
-3. CI не поднимал PostgreSQL и не применял миграции.
+1. В репозитории отсутствует `pnpm-lock.yaml`.
+2. Исходный CI использовал `pnpm install --no-frozen-lockfile`.
+3. Исходный CI не поднимал PostgreSQL и не применял миграции.
 4. Prisma schema не проходила отдельные `format` и `validate` проверки.
 5. Vitest не исключал Playwright-файлы явно.
 6. Playwright не запускался в CI.
@@ -28,30 +28,35 @@
 - Playwright получил CI-настройки, таймауты, повторные попытки и отчёт;
 - добавлен smoke-тест `/api/health`;
 - добавлена начальная PostgreSQL migration;
-- Dockerfile использует standalone output, непривилегированного пользователя и frozen lockfile;
+- Dockerfile сохраняет standalone output и запускает приложение от непривилегированного пользователя;
 - Docker Compose получил health-check и ожидание готовности PostgreSQL;
-- GitHub Actions поднимает PostgreSQL, проверяет Prisma, применяет миграции, запускает lint, typecheck, unit, build, Playwright и standalone smoke-тест;
-- workflow временно генерирует отсутствующий `pnpm-lock.yaml` и публикует его как artifact. После первого успешного запуска lockfile должен быть добавлен в репозиторий, после чего bootstrap-шаг можно удалить.
+- GitHub Actions разделён на bootstrap lockfile и основной quality job;
+- quality job настроен на PostgreSQL, Prisma format/validate/migrate, lint, typecheck, unit, build, Playwright и standalone smoke-тест.
 
-## Проверки
+## Фактический статус проверок
 
-Фактические команды выполняются GitHub Actions, поскольку GitHub-коннектор не предоставляет локальную среду Node.js, Docker и браузер.
+GitHub Actions запустился для Pull Request №14, но job `lockfile` завершился до выполнения доступных через API шагов. Artifact не создан, а GitHub API не вернул журнал job (`BlobNotFound`). Поэтому причина сбоя среды пока не подтверждена.
 
-| Проверка | Статус до CI |
+| Проверка | Статус |
 |---|---|
-| `pnpm install --frozen-lockfile` | ожидает созданный lockfile |
-| Prisma format | настроено в CI |
-| Prisma validate | настроено в CI |
-| Prisma migrate deploy | настроено в CI с PostgreSQL service |
-| lint | настроено в CI |
-| typecheck | настроено в CI |
-| unit tests | настроено в CI |
-| production build | настроено в CI |
-| Playwright | настроено в CI |
-| standalone `/api/health` | настроено в CI |
-| Docker Compose | конфигурация обновлена; Docker Engine отдельно не запускался |
+| Генерация `pnpm-lock.yaml` | не выполнена: CI job завершился ошибкой до artifact |
+| `pnpm install --frozen-lockfile` | не выполнена |
+| Prisma format | настроено, не выполнено |
+| Prisma validate | настроено, не выполнено |
+| Prisma migrate deploy | настроено, не выполнено |
+| lint | настроено, не выполнено |
+| typecheck | настроено, не выполнено |
+| unit tests | настроено, не выполнено |
+| production build | настроено, не выполнено |
+| Playwright | настроено, не выполнено |
+| standalone `/api/health` | настроено, не выполнено |
+| Docker Compose | конфигурация обновлена; Docker Engine не запускался |
 
-Ни одна проверка не считается успешно пройденной до получения зелёного статуса соответствующего GitHub Actions job.
+Ни одна проверка не считается успешно пройденной.
+
+## Lockfile и Docker
+
+До появления реального `pnpm-lock.yaml` Dockerfile использует `pnpm install --no-frozen-lockfile`, чтобы сборка репозитория не была заведомо сломана отсутствующим файлом. После создания и коммита lockfile Dockerfile и CI должны быть переведены на обязательный `--frozen-lockfile`, а bootstrap job удалён.
 
 ## Безопасность
 
@@ -64,6 +69,7 @@
 
 - текущая Prisma schema остаётся минимальной и не является полной моделью каталога;
 - демонстрационный каталог пока хранится в коде;
-- `pnpm-lock.yaml` требуется получить из CI artifact и закоммитить;
+- `pnpm-lock.yaml` отсутствует;
+- CI среды GitHub Actions требует отдельной диагностики владельцем репозитория через UI Actions;
 - реальные PostgreSQL, Bitrix24 и 1С не подключены;
 - дизайн не изменялся.
