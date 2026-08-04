@@ -10,10 +10,18 @@ export type Bearing = {
   d?: number;
   D?: number;
   B?: number;
+  massKg?: number;
   clearance?: string;
   precisionClass?: string;
   seals?: string;
   cage?: string;
+  ringMaterial?: string;
+  rollingElementMaterial?: string;
+  temperatureMinC?: number;
+  temperatureMaxC?: number;
+  dynamicLoadKn?: number;
+  staticLoadKn?: number;
+  limitingSpeedRpm?: number;
   supplyStatus?: "ON_REQUEST" | "CHECK_AVAILABILITY" | "EXPECTED" | "DISCONTINUED" | "UNKNOWN";
   note?: string;
 };
