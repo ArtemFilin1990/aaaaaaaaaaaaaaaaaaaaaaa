@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, codex/project-baseline-fix]
+    branches: [main, codex/project-baseline-fix, codex/catalog-data-model]
   pull_request:
 
 concurrency:
@@ -80,6 +80,19 @@ jobs:
         run: pnpm prisma:validate
       - name: Apply database migrations
         run: pnpm prisma:migrate:deploy
+      - name: Seed catalog twice to verify idempotency
+        run: |
+          pnpm db:seed
+          pnpm db:seed
+      - name: Verify DEMO catalog size
+        run: >-
+          node --input-type=module -e '
+          import { PrismaClient } from "@prisma/client";
+          const prisma = new PrismaClient();
+          const count = await prisma.product.count({ where: { isDemo: true } });
+          await prisma.$disconnect();
+          if (count < 30) throw new Error(`Expected at least 30 DEMO products, got ${count}`);
+          console.log(`DEMO products: ${count}`);'
       - name: Lint
         run: pnpm lint
       - name: Typecheck
