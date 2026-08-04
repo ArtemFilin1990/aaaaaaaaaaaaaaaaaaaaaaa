@@ -7,8 +7,13 @@ export type Bearing = {
   aliases: string[];
   brand?: string;
   type: string;
-  d: number;
-  D: number;
-  B: number;
+  d?: number;
+  D?: number;
+  B?: number;
+  clearance?: string;
+  precisionClass?: string;
+  seals?: string;
+  cage?: string;
+  supplyStatus?: "ON_REQUEST" | "CHECK_AVAILABILITY" | "EXPECTED" | "DISCONTINUED" | "UNKNOWN";
   note?: string;
 };
