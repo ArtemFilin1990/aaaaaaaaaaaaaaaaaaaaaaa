@@ -2,74 +2,106 @@
 
 ## Область проверки
 
+Дата проверки: 2026-08-04.
+
 Этап стабилизирует исходный каркас B2B-каталога «ЭВЕРЕСТ» без подключения рабочих данных, Bitrix24 и 1С.
 
-Базовый коммит `main` на момент начала работ: `763ef7b4f9b45be3f7bd3ef0f7352dad5fbe267e`.
+BASE_SHA актуального `origin/main` на момент начала работ: `9bebd6f0ada7e6cc208ea9b969473a66024c4020`.
 
 Рабочая ветка: `codex/project-baseline-fix`.
 
-## Обнаруженные проблемы
+## Среда
 
-1. В репозитории отсутствует `pnpm-lock.yaml`.
-2. Исходный CI использовал `pnpm install --no-frozen-lockfile`.
-3. Исходный CI не поднимал PostgreSQL и не применял миграции.
-4. Prisma schema не проходила отдельные `format` и `validate` проверки.
-5. Vitest не исключал Playwright-файлы явно.
-6. Playwright не запускался в CI.
-7. Standalone production-сборка не проверялась реальным HTTP-запросом.
-8. Docker Compose не имел health-check для PostgreSQL и приложения.
-9. Начальная Prisma migration отсутствовала.
+- Node.js: `v20.20.2`.
+- Corepack: `0.34.6`.
+- pnpm: `10.14.0`.
+- PostgreSQL service из Docker Compose: `db` (`postgres:17-alpine`).
+- PostgreSQL version: не определена локально, потому что в среде отсутствует Docker CLI/Engine и локальные PostgreSQL binaries.
+- Способ запуска базы по конфигурации проекта: `docker compose up -d db`.
 
-## Выполненные изменения
+## Обнаруженные и исправленные проблемы
 
-- добавлены команды Prisma, базы данных и отдельных тестовых контуров;
-- lint переведён на прямой запуск ESLint с запретом предупреждений;
-- Vitest ограничен unit-тестами и исключает `tests/e2e`;
-- Playwright получил CI-настройки, таймауты, повторные попытки и отчёт;
-- добавлен smoke-тест `/api/health`;
-- добавлена начальная PostgreSQL migration;
-- Dockerfile сохраняет standalone output и запускает приложение от непривилегированного пользователя;
-- Docker Compose получил health-check и ожидание готовности PostgreSQL;
-- GitHub Actions разделён на bootstrap lockfile и основной quality job;
-- quality job настроен на PostgreSQL, Prisma format/validate/migrate, lint, typecheck, unit, build, Playwright и standalone smoke-тест.
+1. В checkout отсутствовал `pnpm-lock.yaml`; lockfile создан штатной командой `pnpm install --lockfile-only` без ручного редактирования.
+2. Dockerfile устанавливал зависимости через `pnpm install --no-frozen-lockfile`; после появления lockfile переведён на `pnpm install --frozen-lockfile`.
+3. CI содержал bootstrap-job, генерирующий lockfile внутри GitHub Actions; после добавления lockfile workflow переведён на прямую воспроизводимую установку с pnpm cache.
+4. `prisma format` изменил только выравнивание полей `Product` в `prisma/schema.prisma`.
 
-## Фактический статус проверок
+## Фактические результаты команд
 
-GitHub Actions запустился для Pull Request №14, но job `lockfile` завершился до выполнения доступных через API шагов. Artifact не создан, а GitHub API не вернул журнал job (`BlobNotFound`). Поэтому причина сбоя среды пока не подтверждена.
+| Команда | Exit code | Статус | Результат |
+|---|---:|---|---|
+| `pwd` | 0 | PASS | `/workspace/aaaaaaaaaaaaaaaaaaaaaaa` |
+| `git status --short` | 0 | PASS | исходно чистое дерево на ветке `work` |
+| `git branch --show-current` | 0 | PASS | `work` |
+| `git rev-parse HEAD` | 0 | PASS | `9bebd6f0ada7e6cc208ea9b969473a66024c4020` |
+| `git remote -v` | 0 | PASS | исходно remote отсутствовал; `origin` добавлен как `https://github.com/ArtemFilin1990/aaaaaaaaaaaaaaaaaaaaaaa.git` |
+| `git fetch origin --prune` | 0 | PASS | удалённые ветки получены |
+| `git rev-parse origin/main` | 0 | PASS | `9bebd6f0ada7e6cc208ea9b969473a66024c4020` |
+| `gh auth status` | 1 | BLOCKED BY ENVIRONMENT | GitHub CLI не аутентифицирован |
+| `node --version` | 0 | PASS | `v20.20.2` |
+| `corepack --version` | 0 | PASS | `0.34.6` |
+| `docker version` | 127 | BLOCKED BY ENVIRONMENT | `docker: command not found` |
+| `docker compose version` | 127 | BLOCKED BY ENVIRONMENT | `docker: command not found` |
+| `corepack enable && corepack prepare pnpm@10.14.0 --activate && pnpm --version` | 0 | PASS | pnpm `10.14.0` активирован |
+| `find . -maxdepth 2 \( -name package-lock.json -o -name yarn.lock -o -name npm-shrinkwrap.json \) -print` | 0 | PASS | конфликтующие lock-файлы не найдены |
+| `pnpm install --lockfile-only` | 0 | PASS | создан `pnpm-lock.yaml` |
+| `pnpm install --frozen-lockfile` | 0 | PASS | воспроизводимая установка завершена успешно |
+| `docker compose up -d db` | 127 | BLOCKED BY ENVIRONMENT | Docker CLI отсутствует |
+| `docker compose ps` | 127 | BLOCKED BY ENVIRONMENT | Docker CLI отсутствует |
+| `docker compose logs --tail=100 db` | 127 | BLOCKED BY ENVIRONMENT | Docker CLI отсутствует |
+| `pnpm exec prisma format` | 0 | PASS | schema отформатирована |
+| `pnpm exec prisma validate` | 0 | PASS | schema валидна |
+| `pnpm prisma:generate` | 0 | PASS | Prisma Client сгенерирован |
+| `pnpm exec prisma migrate deploy` | 1 | BLOCKED BY ENVIRONMENT | тестовая PostgreSQL недоступна на `localhost:5432` |
+| `pnpm lint` | 0 | PASS | ESLint завершился без ошибок |
+| `pnpm typecheck` | 0 | PASS | TypeScript strict проверка завершилась без ошибок |
+| `pnpm test` | 0 | PASS | Vitest: 1 файл, 6 тестов пройдены |
+| `pnpm build` | 0 | PASS | production build Next.js завершён успешно |
+| `pnpm exec playwright install --with-deps chromium` | 1 | BLOCKED BY ENVIRONMENT | системные зависимости установлены, но загрузка Chromium с `cdn.playwright.dev` заблокирована proxy 403 `Domain forbidden` |
+| `pnpm test:e2e` | NOT RUN | NOT RUN | не запускался, потому что Chromium не был установлен |
 
-| Проверка | Статус |
-|---|---|
-| Генерация `pnpm-lock.yaml` | не выполнена: CI job завершился ошибкой до artifact |
-| `pnpm install --frozen-lockfile` | не выполнена |
-| Prisma format | настроено, не выполнено |
-| Prisma validate | настроено, не выполнено |
-| Prisma migrate deploy | настроено, не выполнено |
-| lint | настроено, не выполнено |
-| typecheck | настроено, не выполнено |
-| unit tests | настроено, не выполнено |
-| production build | настроено, не выполнено |
-| Playwright | настроено, не выполнено |
-| standalone `/api/health` | настроено, не выполнено |
-| Docker Compose | конфигурация обновлена; Docker Engine не запускался |
+## Production smoke
 
-Ни одна проверка не считается успешно пройденной.
+Команда запуска: `HOSTNAME=127.0.0.1 PORT=3000 pnpm start` после `pnpm build`.
 
-## Lockfile и Docker
+| URL | HTTP-код | Redirects | Статус |
+|---|---:|---:|---|
+| `/` | 200 | 0 | PASS |
+| `/catalog` | 200 | 0 | PASS |
+| `/search` | 200 | 0 | PASS |
+| `/request` | 200 | 0 | PASS |
+| `/api/health` | 200 | 0 | PASS |
 
-До появления реального `pnpm-lock.yaml` Dockerfile использует `pnpm install --no-frozen-lockfile`, чтобы сборка репозитория не была заведомо сломана отсутствующим файлом. После создания и коммита lockfile Dockerfile и CI должны быть переведены на обязательный `--frozen-lockfile`, а bootstrap job удалён.
+Runtime exception в production smoke не обнаружен по логам запуска. Бесконечных redirect не обнаружено. Внешние CRM-запросы не выполнялись.
+
+## Prisma и PostgreSQL
+
+- `prisma format`, `prisma validate` и `prisma generate` выполнены успешно.
+- Существующая миграция `20260804170000_init` не применена локально из-за отсутствия Docker CLI/Engine и недоступности PostgreSQL на `localhost:5432`.
+- Seed не запускался: в `package.json` нет seed script и отдельная seed-конфигурация не обнаружена.
+
+## CI
+
+Workflow обновлён минимально после появления реального `pnpm-lock.yaml`:
+
+- используется Node.js 22;
+- активируется pnpm `10.14.0`;
+- включён `cache: pnpm` в `actions/setup-node`;
+- выполняется `pnpm install --frozen-lockfile`;
+- PostgreSQL service с health-check сохранён;
+- тестовый `DATABASE_URL` сохранён;
+- Prisma generate/format/validate/migrate, lint, typecheck, Vitest, production build, Playwright и standalone smoke сохранены как обязательные шаги;
+- production-секреты и Bitrix24 write mode не используются.
 
 ## Безопасность
 
-- рабочие webhook, токены и `.env` не добавлялись;
-- `B24_MODE=mock` и `B24_WRITE_ENABLED=false` сохранены;
-- тестовая PostgreSQL использует только локальные учётные данные CI;
-- внешние запросы Bitrix24 и 1С не выполняются.
+- `.env` создан только локально для проверок и не отслеживается Git.
+- Production webhook, токены, API keys, private keys и клиентские данные не добавлялись.
+- `B24_MODE=mock` и `B24_WRITE_ENABLED=false` сохранены в CI и Docker Compose.
+- Внешние Bitrix24/CRM-запросы не выполнялись.
 
-## Ограничения следующего этапа
+## Ограничения
 
-- текущая Prisma schema остаётся минимальной и не является полной моделью каталога;
-- демонстрационный каталог пока хранится в коде;
-- `pnpm-lock.yaml` отсутствует;
-- CI среды GitHub Actions требует отдельной диагностики владельцем репозитория через UI Actions;
-- реальные PostgreSQL, Bitrix24 и 1С не подключены;
-- дизайн не изменялся.
+- Docker CLI/Engine отсутствует в среде, поэтому Docker Compose, PostgreSQL container logs и миграции на чистой базе локально заблокированы средой.
+- GitHub CLI не аутентифицирован, поэтому push и Pull Request через `gh` локально заблокированы средой.
+- Загрузка Playwright Chromium с `cdn.playwright.dev` заблокирована proxy 403, поэтому E2E браузерный запуск локально не выполнен.
