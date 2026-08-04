@@ -33,10 +33,18 @@ function toBearing(record: ProductRecord): Bearing {
     d: record.innerDiameterMm ?? undefined,
     D: record.outerDiameterMm ?? undefined,
     B: record.widthMm ?? record.heightMm ?? undefined,
+    massKg: record.massKg ?? undefined,
     clearance: record.clearance ?? undefined,
     precisionClass: record.precisionClass ?? undefined,
     seals: record.seals ?? undefined,
     cage: record.cage ?? undefined,
+    ringMaterial: record.ringMaterial ?? undefined,
+    rollingElementMaterial: record.rollingElementMaterial ?? undefined,
+    temperatureMinC: record.temperatureMinC ?? undefined,
+    temperatureMaxC: record.temperatureMaxC ?? undefined,
+    dynamicLoadKn: record.dynamicLoadKn ?? undefined,
+    staticLoadKn: record.staticLoadKn ?? undefined,
+    limitingSpeedRpm: record.limitingSpeedRpm ?? undefined,
     supplyStatus: record.supplyStatus,
     note: record.isDemo ? "Демонстрационные данные" : undefined
   };
