@@ -75,8 +75,14 @@ export class InMemoryCatalogRepository implements CatalogRepository {
     return (analogDefinitions[slug] ?? []).flatMap((definition) => {
       const product = demoProducts.find((candidate) => candidate.slug === definition.targetSlug);
       if (!product) return [];
-      const { targetSlug: _targetSlug, ...relation } = definition;
-      return [{ product, ...relation }];
+      return [{
+        product,
+        status: definition.status,
+        evidenceLevel: definition.evidenceLevel,
+        matchingAttributes: definition.matchingAttributes,
+        differingAttributes: definition.differingAttributes,
+        warning: definition.warning
+      }];
     });
   }
 }
