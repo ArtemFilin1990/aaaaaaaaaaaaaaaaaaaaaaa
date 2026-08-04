@@ -15,7 +15,10 @@ export function BearingCard({ bearing }: { bearing: Bearing }) {
         <div><dt className="text-neutral-500">B</dt><dd className="font-mono">{formatDimension(bearing.B)}</dd></div>
       </dl>
       <p className="mt-4 text-xs text-neutral-500">{bearing.note}</p>
-      <Link href={`/product/${bearing.slug}`} className="mt-5 inline-block font-semibold text-signal">Открыть карточку →</Link>
+      <div className="mt-5 flex flex-wrap gap-4">
+        <Link href={`/product/${bearing.slug}`} className="font-semibold text-signal">Открыть карточку →</Link>
+        <Link href={`/request?product=${encodeURIComponent(bearing.slug)}`} className="font-semibold text-navy">Добавить в заявку</Link>
+      </div>
     </article>
   );
 }
