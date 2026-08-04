@@ -130,7 +130,6 @@ addSpecial({ iso: "7205", brandSlug: "demo-skf", categorySlug: "angular-contact"
 addSpecial({ iso: "7306", brandSlug: "demo-fag", categorySlug: "angular-contact", bearingType: "ANGULAR_CONTACT", d: 30, D: 72, B: 19, cage: "Латунный" });
 
 const products = new Map();
-const designations = new Map();
 
 for (const definition of productDefinitions) {
   const brand = brands.get(definition.brandSlug);
@@ -168,35 +167,15 @@ for (const definition of productDefinitions) {
     isDemo: true
   };
 
-  const product = await prisma.product.upsert({
-    where: { sku },
-    update: productData,
-    create: productData
-  });
+  const product = await prisma.product.upsert({ where: { sku }, update: productData, create: productData });
   products.set(definition.key, product);
 
   const isoNormalized = normalize(definition.iso);
   const isoDesignation = await prisma.productDesignation.upsert({
-    where: {
-      productId_normalizedValue_system: {
-        productId: product.id,
-        normalizedValue: isoNormalized,
-        system: "ISO"
-      }
-    },
+    where: { productId_normalizedValue_system: { productId: product.id, normalizedValue: isoNormalized, system: "ISO" } },
     update: { value: definition.iso, isPrimary: true, isSearchAlias: true, source: "DEMO seed", verificationStatus: "VERIFIED" },
-    create: {
-      productId: product.id,
-      value: definition.iso,
-      normalizedValue: isoNormalized,
-      system: "ISO",
-      isPrimary: true,
-      isSearchAlias: true,
-      source: "DEMO seed",
-      verificationStatus: "VERIFIED"
-    }
+    create: { productId: product.id, value: definition.iso, normalizedValue: isoNormalized, system: "ISO", isPrimary: true, isSearchAlias: true, source: "DEMO seed", verificationStatus: "VERIFIED" }
   });
-  designations.set(`${definition.key}:ISO`, isoDesignation);
 
   await prisma.searchAlias.upsert({
     where: { productId_normalizedValue: { productId: product.id, normalizedValue: isoNormalized } },
@@ -207,26 +186,10 @@ for (const definition of productDefinitions) {
   if (definition.gost) {
     const gostNormalized = normalize(definition.gost);
     const gostDesignation = await prisma.productDesignation.upsert({
-      where: {
-        productId_normalizedValue_system: {
-          productId: product.id,
-          normalizedValue: gostNormalized,
-          system: "GOST"
-        }
-      },
+      where: { productId_normalizedValue_system: { productId: product.id, normalizedValue: gostNormalized, system: "GOST" } },
       update: { value: definition.gost, isPrimary: false, isSearchAlias: true, source: "DEMO seed", verificationStatus: "VERIFIED" },
-      create: {
-        productId: product.id,
-        value: definition.gost,
-        normalizedValue: gostNormalized,
-        system: "GOST",
-        isPrimary: false,
-        isSearchAlias: true,
-        source: "DEMO seed",
-        verificationStatus: "VERIFIED"
-      }
+      create: { productId: product.id, value: definition.gost, normalizedValue: gostNormalized, system: "GOST", isPrimary: false, isSearchAlias: true, source: "DEMO seed", verificationStatus: "VERIFIED" }
     });
-    designations.set(`${definition.key}:GOST`, gostDesignation);
 
     await prisma.searchAlias.upsert({
       where: { productId_normalizedValue: { productId: product.id, normalizedValue: gostNormalized } },
@@ -235,22 +198,9 @@ for (const definition of productDefinitions) {
     });
 
     await prisma.standardMapping.upsert({
-      where: {
-        sourceDesignationId_targetDesignationId: {
-          sourceDesignationId: gostDesignation.id,
-          targetDesignationId: isoDesignation.id
-        }
-      },
+      where: { sourceDesignationId_targetDesignationId: { sourceDesignationId: gostDesignation.id, targetDesignationId: isoDesignation.id } },
       update: { status: "DIRECT", evidenceLevel: "B", source: "DEMO seed", comment: "Учебное соответствие ГОСТ → ISO", manuallyVerified: false },
-      create: {
-        sourceDesignationId: gostDesignation.id,
-        targetDesignationId: isoDesignation.id,
-        status: "DIRECT",
-        evidenceLevel: "B",
-        source: "DEMO seed",
-        comment: "Учебное соответствие ГОСТ → ISO",
-        manuallyVerified: false
-      }
+      create: { sourceDesignationId: gostDesignation.id, targetDesignationId: isoDesignation.id, status: "DIRECT", evidenceLevel: "B", source: "DEMO seed", comment: "Учебное соответствие ГОСТ → ISO", manuallyVerified: false }
     });
   }
 
@@ -264,7 +214,7 @@ for (const definition of productDefinitions) {
 async function upsertAnalog(sourceKey, targetKey, status, evidenceLevel, matchingAttributes, differingAttributes, comment) {
   const sourceProduct = products.get(sourceKey);
   const targetProduct = products.get(targetKey);
-  if (!sourceProduct || !targetProduct) return;
+  if (!sourceProduct || !targetProduct) throw new Error(`Missing DEMO analog endpoint: ${sourceKey} -> ${targetKey}`);
 
   const relation = await prisma.analogRelation.upsert({
     where: { sourceProductId_targetProductId: { sourceProductId: sourceProduct.id, targetProductId: targetProduct.id } },
@@ -273,48 +223,13 @@ async function upsertAnalog(sourceKey, targetKey, status, evidenceLevel, matchin
   });
 
   await prisma.analogEvidence.deleteMany({ where: { analogRelationId: relation.id } });
-  await prisma.analogEvidence.create({
-    data: { analogRelationId: relation.id, level: evidenceLevel, sourceName: "DEMO seed", note: "Учебная запись. Требуется проверка по реальному каталогу производителя." }
-  });
+  await prisma.analogEvidence.create({ data: { analogRelationId: relation.id, level: evidenceLevel, sourceName: "DEMO seed", note: "Учебная запись. Требуется проверка по реальному каталогу производителя." } });
 }
 
-await upsertAnalog(
-  "6205-open-skf-demo-skf",
-  "6205-open-fag-demo-fag",
-  "DIRECT",
-  "B",
-  ["d", "D", "B", "зазор", "точность", "уплотнение"],
-  ["бренд"],
-  "Учебный прямой аналог между DEMO-брендами при совпадении критичных параметров."
-);
-await upsertAnalog(
-  "6205-open-skf-demo-skf",
-  "6205-2rs-demo-everest",
-  "PARTIAL",
-  "B",
-  ["d", "D", "B"],
-  ["уплотнение", "предельные обороты"],
-  "Закрытая модификация не должна считаться полной заменой открытого исполнения автоматически."
-);
-await upsertAnalog(
-  "6205-open-skf-demo-skf",
-  "6205-p6-demo-nsk",
-  "PARTIAL",
-  "R",
-  ["d", "D", "B"],
-  ["класс точности"],
-  "Кандидат требует инженерной проверки класса точности и посадок."
-);
-await upsertAnalog(
-  "30205-demo-everest",
-  "7205-demo-skf",
-  "CONFLICT",
-  "A",
-  [],
-  ["система обозначения", "тип подшипника", "геометрия"],
-  "Строка 7205 неоднозначна: ГОСТ 7205 соответствует ISO 30205, а ISO 7205 обозначает радиально-упорный подшипник."
-);
+await upsertAnalog("6205-open-skf-demo-skf", "6205-open-fag-demo-fag", "DIRECT", "B", ["d", "D", "B", "зазор", "точность", "уплотнение"], ["бренд"], "Учебный прямой аналог между DEMO-брендами при совпадении критичных параметров.");
+await upsertAnalog("6205-open-skf-demo-skf", "6205-2rs-demo-skf", "PARTIAL", "B", ["d", "D", "B"], ["уплотнение", "предельные обороты"], "Закрытая модификация не должна считаться полной заменой открытого исполнения автоматически.");
+await upsertAnalog("6205-open-skf-demo-skf", "6205-p6-demo-everest", "PARTIAL", "R", ["d", "D", "B"], ["класс точности"], "Кандидат требует инженерной проверки класса точности и посадок.");
+await upsertAnalog("30205-demo-everest", "7205-demo-skf", "CONFLICT", "A", [], ["система обозначения", "тип подшипника", "геометрия"], "Строка 7205 неоднозначна: ГОСТ 7205 соответствует ISO 30205, а ISO 7205 обозначает радиально-упорный подшипник.");
 
 console.log(`Seed completed: ${productDefinitions.length} DEMO products.`);
-
 await prisma.$disconnect();
