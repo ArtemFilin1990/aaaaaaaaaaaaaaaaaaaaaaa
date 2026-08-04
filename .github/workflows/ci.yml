@@ -15,6 +15,7 @@ jobs:
     timeout-minutes: 30
     env:
       DATABASE_URL: postgresql://everest:everest@127.0.0.1:5432/everest_test?schema=public
+      SHADOW_DATABASE_URL: postgresql://everest:everest@127.0.0.1:5432/everest_shadow?schema=public
       B24_MODE: mock
       B24_WRITE_ENABLED: "false"
       NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
@@ -53,8 +54,20 @@ jobs:
           git diff --exit-code -- prisma/schema.prisma
       - name: Validate Prisma schema
         run: pnpm prisma:validate
+      - name: Prepare Prisma shadow database
+        run: PGPASSWORD=everest createdb -h 127.0.0.1 -U everest everest_shadow
       - name: Apply database migrations
         run: pnpm prisma:migrate:deploy
+      - name: Seed catalog database first pass
+        run: pnpm prisma db seed
+      - name: Verify catalog database after first seed
+        run: pnpm db:verify
+      - name: Seed catalog database second pass
+        run: pnpm prisma db seed
+      - name: Verify catalog database after second seed
+        run: pnpm db:verify
+      - name: Check Prisma schema drift
+        run: pnpm db:drift
       - name: Lint
         run: pnpm lint
       - name: Typecheck

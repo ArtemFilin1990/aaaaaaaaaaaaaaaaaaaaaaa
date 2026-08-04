@@ -1,5 +1,11 @@
--- Rebuild baseline demo Product table into the canonical catalog model.
-DROP TABLE IF EXISTS "Product" CASCADE;
+-- Rebuild baseline Product table into the canonical catalog model.
+-- The previous stage created a flat demo Product table. This migration keeps
+-- existing rows by renaming that table, creating the canonical structure, and
+-- converting legacy fields into Product/ProductDesignation/StandardMapping rows.
+ALTER TABLE "Product" RENAME TO "_Stage1Product";
+ALTER TABLE "_Stage1Product" RENAME CONSTRAINT "Product_pkey" TO "_Stage1Product_pkey";
+ALTER INDEX "Product_slug_key" RENAME TO "_Stage1Product_slug_key";
+ALTER INDEX "Product_sku_key" RENAME TO "_Stage1Product_sku_key";
 
 -- CreateEnum
 CREATE TYPE "DesignationKind" AS ENUM ('INTERNAL_SKU', 'MANUFACTURER', 'GOST', 'ISO');
@@ -9,6 +15,12 @@ CREATE TYPE "AttributeValueType" AS ENUM ('STRING', 'NUMBER', 'BOOLEAN', 'JSON')
 
 -- CreateEnum
 CREATE TYPE "StandardKind" AS ENUM ('GOST', 'ISO', 'DIN', 'SKF', 'MANUFACTURER', 'INTERNAL');
+
+-- CreateEnum
+CREATE TYPE "AnalogStatus" AS ENUM ('DIRECT', 'ONE_WAY', 'PARTIAL', 'SIZE_ONLY', 'NO_DIRECT', 'CONFLICT');
+
+-- CreateEnum
+CREATE TYPE "EvidenceLevel" AS ENUM ('A', 'B', 'C', 'R');
 
 -- CreateEnum
 CREATE TYPE "DocumentKind" AS ENUM ('CERTIFICATE', 'DATASHEET', 'DRAWING', 'PASSPORT', 'OTHER');
@@ -290,6 +302,66 @@ CREATE INDEX "ImportRow_productId_idx" ON "ImportRow"("productId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ImportRow_importBatchId_rowNumber_key" ON "ImportRow"("importBatchId", "rowNumber");
+
+
+-- MigrateData
+INSERT INTO "Brand" ("id", "name", "normalizedName", "isDemo", "createdAt", "updatedAt")
+SELECT
+    'migrated-brand-' || md5("legacyBrand"),
+    "legacyBrand",
+    upper(regexp_replace("legacyBrand", '[\s/_]+', '-', 'g')),
+    "isDemo",
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+FROM (
+    SELECT COALESCE(NULLIF(trim("brand"), ''), 'DEMO UNSPECIFIED') AS "legacyBrand", bool_and("isDemo") AS "isDemo"
+    FROM "_Stage1Product"
+    WHERE "brand" IS NOT NULL AND trim("brand") <> ''
+    GROUP BY COALESCE(NULLIF(trim("brand"), ''), 'DEMO UNSPECIFIED')
+) brands
+ON CONFLICT ("normalizedName") DO NOTHING;
+
+INSERT INTO "Product" (
+    "id", "slug", "name", "brandId", "bearingType", "boreDiameter", "outerDiameter", "widthOrHeight",
+    "dimensionUnit", "supplyStatus", "isDemo", "createdAt", "updatedAt"
+)
+SELECT
+    "id",
+    "slug",
+    "name",
+    CASE WHEN "brand" IS NULL OR trim("brand") = '' THEN NULL ELSE 'migrated-brand-' || md5(COALESCE(NULLIF(trim("brand"), ''), 'UNSPECIFIED')) END,
+    "type",
+    "bore"::numeric(10,3),
+    "outside"::numeric(10,3),
+    "width"::numeric(10,3),
+    'mm',
+    'MIGRATED_UNCONFIRMED',
+    "isDemo",
+    "createdAt",
+    "updatedAt"
+FROM "_Stage1Product";
+
+INSERT INTO "ProductDesignation" ("id", "productId", "kind", "source", "rawValue", "normalizedValue", "isPrimary", "createdAt")
+SELECT 'migrated-sku-' || md5("id" || "sku"), "id", 'INTERNAL_SKU'::"DesignationKind", 'legacy-product', "sku", upper(regexp_replace("sku", '[\s/_]+', '-', 'g')), true, CURRENT_TIMESTAMP
+FROM "_Stage1Product";
+
+INSERT INTO "ProductDesignation" ("id", "productId", "kind", "source", "rawValue", "normalizedValue", "isPrimary", "createdAt")
+SELECT 'migrated-gost-' || md5("id" || "gost"), "id", 'GOST'::"DesignationKind", 'legacy-product', "gost", upper(regexp_replace("gost", '[\s/_]+', '-', 'g')), true, CURRENT_TIMESTAMP
+FROM "_Stage1Product" WHERE "gost" IS NOT NULL AND trim("gost") <> '';
+
+INSERT INTO "ProductDesignation" ("id", "productId", "kind", "source", "rawValue", "normalizedValue", "isPrimary", "createdAt")
+SELECT 'migrated-iso-' || md5("id" || "iso"), "id", 'ISO'::"DesignationKind", 'legacy-product', "iso", upper(regexp_replace("iso", '[\s/_]+', '-', 'g')), true, CURRENT_TIMESTAMP
+FROM "_Stage1Product" WHERE "iso" IS NOT NULL AND trim("iso") <> '';
+
+INSERT INTO "StandardMapping" ("id", "productId", "standardKind", "rawCode", "normalizedCode", "note", "createdAt")
+SELECT 'migrated-std-gost-' || md5("id" || "gost"), "id", 'GOST'::"StandardKind", "gost", upper(regexp_replace("gost", '[\s/_]+', '-', 'g')), 'Migrated from stage-1 Product.gost', CURRENT_TIMESTAMP
+FROM "_Stage1Product" WHERE "gost" IS NOT NULL AND trim("gost") <> '';
+
+INSERT INTO "StandardMapping" ("id", "productId", "standardKind", "rawCode", "normalizedCode", "note", "createdAt")
+SELECT 'migrated-std-iso-' || md5("id" || "iso"), "id", 'ISO'::"StandardKind", "iso", upper(regexp_replace("iso", '[\s/_]+', '-', 'g')), 'Migrated from stage-1 Product.iso', CURRENT_TIMESTAMP
+FROM "_Stage1Product" WHERE "iso" IS NOT NULL AND trim("iso") <> '';
+
+DROP TABLE "_Stage1Product";
 
 -- AddForeignKey
 ALTER TABLE "Product" ADD CONSTRAINT "Product_brandId_fkey" FOREIGN KEY ("brandId") REFERENCES "Brand"("id") ON DELETE SET NULL ON UPDATE CASCADE;
