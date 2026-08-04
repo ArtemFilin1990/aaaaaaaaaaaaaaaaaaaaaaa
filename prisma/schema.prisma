@@ -23,19 +23,314 @@ enum EvidenceLevel {
   R
 }
 
-model Product {
-  id          String   @id @default(cuid())
-  slug        String   @unique
+enum DesignationSystem {
+  GOST
+  ISO
+  BRAND
+  INTERNAL
+  OTHER
+}
+
+enum VerificationStatus {
+  VERIFIED
+  UNVERIFIED
+  REQUIRES_REVIEW
+  REJECTED
+}
+
+enum SupplyStatus {
+  ON_REQUEST
+  CHECK_AVAILABILITY
+  EXPECTED
+  DISCONTINUED
+  UNKNOWN
+}
+
+enum SourceStatus {
+  DEMO
+  IMPORTED
+  VERIFIED
+  REQUIRES_REVIEW
+  ARCHIVED
+}
+
+enum BearingType {
+  RADIAL_BALL
+  ANGULAR_CONTACT
+  TAPERED_ROLLER
+  CYLINDRICAL_ROLLER
+  SPHERICAL_ROLLER
+  NEEDLE
+  THRUST
+  HOUSING_UNIT
+  OTHER
+}
+
+enum DocumentType {
+  DATASHEET
+  DRAWING
+  CERTIFICATE
+  STANDARD
+  MANUAL
+  OTHER
+}
+
+enum ImportBatchStatus {
+  UPLOADED
+  VALIDATING
+  READY
+  APPLIED
+  PARTIALLY_APPLIED
+  REJECTED
+  ROLLED_BACK
+}
+
+enum ImportRowStatus {
+  PENDING
+  VALID
+  WARNING
+  ERROR
+  APPLIED
+  SKIPPED
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  slug      String    @unique
+  name      String    @unique
+  country   String?
+  website   String?
+  isDemo    Boolean   @default(false)
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  slug        String     @unique
   name        String
-  sku         String   @unique
-  gost        String?
-  iso         String?
-  brand       String?
-  type        String
-  bore        Float
-  outside     Float
-  width       Float
-  isDemo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  description String?
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([parentId])
+}
+
+model Product {
+  id                     String              @id @default(cuid())
+  slug                   String              @unique
+  name                   String
+  sku                    String              @unique
+  categoryId             String
+  brandId                String?
+  country                String?
+  bearingType            BearingType
+  innerDiameterMm        Float?
+  outerDiameterMm        Float?
+  widthMm                Float?
+  heightMm               Float?
+  massKg                 Float?
+  clearance              String?
+  precisionClass         String?
+  seals                  String?
+  cage                   String?
+  ringMaterial           String?
+  rollingElementMaterial String?
+  temperatureMinC        Float?
+  temperatureMaxC        Float?
+  dynamicLoadKn          Float?
+  staticLoadKn           Float?
+  limitingSpeedRpm       Int?
+  supplyStatus           SupplyStatus        @default(UNKNOWN)
+  leadTimeText           String?
+  sourceStatus           SourceStatus        @default(REQUIRES_REVIEW)
+  isPublished            Boolean             @default(false)
+  isDemo                 Boolean             @default(true)
+  category               Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand                  Brand?              @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  designations           ProductDesignation[]
+  searchAliases          SearchAlias[]
+  attributes             ProductAttribute[]
+  documents              TechnicalDocument[]
+  analogsFrom            AnalogRelation[]    @relation("AnalogSource")
+  analogsTo              AnalogRelation[]    @relation("AnalogTarget")
+  importRows             ImportRow[]
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([bearingType])
+  @@index([innerDiameterMm, outerDiameterMm, widthMm])
+  @@index([supplyStatus, isPublished])
+  @@index([sourceStatus, isDemo])
+}
+
+model ProductDesignation {
+  id                 String              @id @default(cuid())
+  productId          String
+  value              String
+  normalizedValue    String
+  system             DesignationSystem
+  isPrimary          Boolean             @default(false)
+  isSearchAlias      Boolean             @default(true)
+  source             String?
+  verificationStatus VerificationStatus  @default(UNVERIFIED)
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceMappings     StandardMapping[]   @relation("StandardMappingSource")
+  targetMappings     StandardMapping[]   @relation("StandardMappingTarget")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([productId, normalizedValue, system])
+  @@index([normalizedValue, system])
+  @@index([productId, isPrimary])
+}
+
+model SearchAlias {
+  id                 String             @id @default(cuid())
+  productId          String
+  value              String
+  normalizedValue    String
+  source             String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  product            Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt          DateTime           @default(now())
+
+  @@unique([productId, normalizedValue])
+  @@index([normalizedValue])
+}
+
+model StandardMapping {
+  id                    String             @id @default(cuid())
+  sourceDesignationId   String
+  targetDesignationId   String
+  status                AnalogStatus
+  evidenceLevel         EvidenceLevel
+  source                String?
+  comment               String?
+  verifiedAt            DateTime?
+  manuallyVerified      Boolean            @default(false)
+  sourceDesignation     ProductDesignation @relation("StandardMappingSource", fields: [sourceDesignationId], references: [id], onDelete: Cascade)
+  targetDesignation     ProductDesignation @relation("StandardMappingTarget", fields: [targetDesignationId], references: [id], onDelete: Cascade)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@unique([sourceDesignationId, targetDesignationId])
+  @@index([status, evidenceLevel])
+}
+
+model ProductAttribute {
+  id                 String             @id @default(cuid())
+  productId          String
+  key                String
+  label              String
+  value              String?
+  numericValue       Float?
+  unit               String?
+  source             String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  product            Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([productId, key])
+  @@index([key, value])
+}
+
+model AnalogRelation {
+  id                  String           @id @default(cuid())
+  sourceProductId     String
+  targetProductId     String
+  status              AnalogStatus
+  evidenceLevel       EvidenceLevel
+  source              String?
+  comment             String?
+  matchingAttributes  String[]         @default([])
+  differingAttributes String[]         @default([])
+  reviewedAt          DateTime?
+  manuallyVerified    Boolean          @default(false)
+  sourceProduct       Product          @relation("AnalogSource", fields: [sourceProductId], references: [id], onDelete: Cascade)
+  targetProduct       Product          @relation("AnalogTarget", fields: [targetProductId], references: [id], onDelete: Cascade)
+  evidence            AnalogEvidence[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@unique([sourceProductId, targetProductId])
+  @@index([status, evidenceLevel])
+  @@index([targetProductId])
+}
+
+model AnalogEvidence {
+  id               String         @id @default(cuid())
+  analogRelationId String
+  level            EvidenceLevel
+  sourceName       String
+  sourceUrl        String?
+  note             String?
+  verifiedAt       DateTime?
+  analogRelation   AnalogRelation @relation(fields: [analogRelationId], references: [id], onDelete: Cascade)
+  createdAt        DateTime       @default(now())
+
+  @@index([analogRelationId, level])
+}
+
+model TechnicalDocument {
+  id                 String             @id @default(cuid())
+  productId          String
+  type               DocumentType
+  title              String
+  url                String?
+  filePath           String?
+  standardNumber     String?
+  source             String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  isPublic           Boolean            @default(false)
+  product            Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([productId, type])
+}
+
+model ImportBatch {
+  id          String            @id @default(cuid())
+  fileName    String
+  source      String
+  status      ImportBatchStatus @default(UPLOADED)
+  totalRows   Int               @default(0)
+  validRows   Int               @default(0)
+  errorRows   Int               @default(0)
+  appliedRows Int               @default(0)
+  startedAt   DateTime?
+  completedAt DateTime?
+  rows        ImportRow[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([status, createdAt])
+}
+
+model ImportRow {
+  id            String          @id @default(cuid())
+  batchId       String
+  rowNumber     Int
+  status        ImportRowStatus @default(PENDING)
+  rawData       Json
+  normalizedData Json?
+  errorMessages String[]        @default([])
+  productId     String?
+  batch         ImportBatch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  product       Product?        @relation(fields: [productId], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([batchId, rowNumber])
+  @@index([status])
+  @@index([productId])
 }
