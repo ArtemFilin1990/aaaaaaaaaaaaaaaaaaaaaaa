@@ -46,7 +46,7 @@ export function buildDemoCatalogSeed() {
     analogRelations: [
       { sourceSku: "DEMO-6201", targetSku: "DEMO-6202", status: "SIZE_ONLY", evidenceLevel: "R", note: "DEMO: размерная близость не подтверждает прямой аналог" },
       { sourceSku: "DEMO-6203", targetSku: "DEMO-6204", status: "PARTIAL", evidenceLevel: "C", note: "DEMO: требуется инженерная проверка условий применения" },
-      { sourceSku: "DEMO-6301", targetSku: "DEMO-6302", status: "NO_DIRECT", evidenceLevel: "B", note: "DEMO: прямой замены нет" },
+      { sourceSku: "DEMO-6316", targetSku: "DEMO-6317", status: "NO_DIRECT", evidenceLevel: "B", note: "DEMO: прямой замены нет" },
     ],
   };
 }
