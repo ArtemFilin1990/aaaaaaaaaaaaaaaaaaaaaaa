@@ -10,28 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lockfile:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.14.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Generate lockfile
-        run: pnpm install --lockfile-only --no-frozen-lockfile
-      - name: Upload lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: pnpm-lock
-          path: pnpm-lock.yaml
-          if-no-files-found: error
-
   quality:
-    needs: lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -63,11 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Download generated lockfile
-        uses: actions/download-artifact@v4
-        with:
-          name: pnpm-lock
-          path: .
+          cache: pnpm
       - name: Install dependencies reproducibly
         run: pnpm install --frozen-lockfile
       - name: Generate Prisma client
