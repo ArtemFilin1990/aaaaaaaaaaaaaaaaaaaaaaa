@@ -1,4 +1,3 @@
-import "server-only";
 import type { CommercialRequestInput } from "@/lib/request/schema";
 
 export type RequestSubmissionResult = {
