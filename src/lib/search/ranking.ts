@@ -98,6 +98,9 @@ export function rankBearing(product: Bearing, queryValue: string): BearingSearch
 
   if (
     query.dimensions &&
+    product.d != null &&
+    product.D != null &&
+    product.B != null &&
     equalNumber(product.d, query.dimensions.d) &&
     equalNumber(product.D, query.dimensions.D) &&
     equalNumber(product.B, query.dimensions.B)
