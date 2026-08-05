@@ -20,4 +20,28 @@ export type CatalogProductView = {
   isDemo: boolean;
 };
 
+export type ProductAnalogView = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  evidenceLevel: string;
+  evidenceLabel: string;
+  note: string | null;
+  target: CatalogProductView;
+  warnings: string[];
+};
+
+export type ProductDetailView = CatalogProductView & {
+  massKg: string | null;
+  cage: string | null;
+  dynamicLoadRating: string | null;
+  staticLoadRating: string | null;
+  loadRatingUnit: string | null;
+  limitingSpeedRpm: number | null;
+  referenceSpeedRpm: number | null;
+  temperatureMinC: number | null;
+  temperatureMaxC: number | null;
+  analogs: ProductAnalogView[];
+};
+
 export type Bearing = CatalogProductView;
