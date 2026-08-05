@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { BearingCard } from "@/components/bearing-card";
-import { demoProducts } from "@/data/demo-products";
+
 
 export default function HomePage() {
   return (
@@ -19,7 +18,7 @@ export default function HomePage() {
       </section>
       <section className="mx-auto max-w-7xl px-5 py-16">
         <div className="flex items-end justify-between gap-4"><div><p className="font-mono text-xs uppercase tracking-[0.2em] text-signal">Демо-каталог</p><h2 className="mt-3 text-3xl font-black">Популярные обозначения</h2></div><Link href="/catalog" className="font-semibold text-signal">Весь каталог →</Link></div>
-        <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-3">{demoProducts.slice(0, 3).map((bearing) => <BearingCard key={bearing.slug} bearing={bearing} />)}</div>
+        <p className="mt-8 rounded-xl border border-steel bg-white p-5 text-neutral-600">Демонстрационный каталог и поиск работают через PostgreSQL. Перейдите в каталог или используйте поиск по обозначению.</p>
       </section>
     </>
   );

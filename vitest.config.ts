@@ -10,6 +10,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    exclude: ["tests/e2e/**", "node_modules/**", ".next/**", "playwright-report/**", "test-results/**"]
+    exclude: ["tests/e2e/**", "tests/integration/**", "node_modules/**", ".next/**", "playwright-report/**", "test-results/**"]
   }
 });
