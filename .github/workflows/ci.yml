@@ -74,6 +74,10 @@ jobs:
         run: pnpm typecheck
       - name: Unit tests
         run: pnpm test
+      - name: PostgreSQL integration tests
+        run: pnpm test:integration
+      - name: Verify catalog database after integration tests
+        run: pnpm db:verify
       - name: Production build
         run: pnpm build
       - name: Install Chromium
